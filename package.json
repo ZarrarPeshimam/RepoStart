@@ -1,0 +1,90 @@
+{
+  "name": "repostart",
+  "displayName": "RepoStart",
+  "description": "Clone any repo → Click once → Start contributing.",
+  "version": "0.1.0",
+  "publisher": "repostart",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "onboarding",
+    "setup",
+    "npm",
+    "node",
+    "monorepo"
+  ],
+  "activationEvents": [
+    "workspaceContains:package.json"
+  ],
+  "main": "./out/extension.js",
+  "icon": "assets/icon.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "repostart.openDashboard",
+        "title": "RepoStart: Open Dashboard",
+        "icon": {
+          "light": "./assets/sidebar-icon.svg",
+          "dark": "./assets/sidebar-icon.svg"
+        }
+      },
+      {
+        "command": "repostart.runSetup",
+        "title": "RepoStart: Run Setup",
+        "icon": "$(play)"
+      },
+      {
+        "command": "repostart.runProject",
+        "title": "RepoStart: Run Project",
+        "icon": "$(run-all)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "repostart-sidebar",
+          "title": "RepoStart",
+          "icon": "assets/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "repostart-sidebar": [
+        {
+          "type": "webview",
+          "id": "repostart.sidebarView",
+          "name": "RepoStart"
+        }
+      ]
+    },
+    "menus": {
+      "editor/title": [
+        {
+          "command": "repostart.openDashboard",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
