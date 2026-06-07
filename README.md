@@ -1,6 +1,6 @@
 # RepoStart
 
-### Developer Onboarding Tool for Open Source and Collaborative Projects
+### Developer Onboarding Tool
 
 > Clone any repo → Click once → Start contributing.
 
