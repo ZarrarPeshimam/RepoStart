@@ -61,6 +61,11 @@ RepoStart:
 
 ---
 
+## Preview:
+<img width="1918" height="914" alt="Screenshot 2026-06-07 204739" src="https://github.com/user-attachments/assets/3b11343a-bccf-4a3e-9efc-972ad468066f" />
+
+---
+
 ## Folder Structure
 ```
 repostart/
