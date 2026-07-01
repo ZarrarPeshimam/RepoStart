@@ -206,19 +206,74 @@ export function getDashboardHTML(
     .timeline-empty { display: flex; flex-direction: column; align-items: center;
       justify-content: center; height: 160px; gap: 8px; color: var(--text-muted); }
     .timeline-list { display: flex; flex-direction: column; gap: 2px; }
-    .timeline-item { display: flex; align-items: flex-start; gap: 10px;
-      padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid transparent;
-      transition: all var(--transition); animation: slideIn 0.2s ease; }
+
+    /* FIX: Timeline item — constrained width, no overflow */
+    .timeline-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      transition: all var(--transition);
+      animation: slideIn 0.2s ease;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+    }
     .timeline-item.tl-running { background: rgba(245,200,66,0.04); border-color: rgba(245,200,66,0.12); }
     .timeline-item.tl-success { background: rgba(52,201,123,0.04); border-color: rgba(52,201,123,0.1); }
     .timeline-item.tl-error   { background: rgba(240,91,91,0.04); border-color: rgba(240,91,91,0.12); }
     .timeline-item.tl-skipped { opacity: 0.5; }
     .tl-icon { font-size: 13px; line-height: 1.5; flex-shrink: 0; width: 16px; text-align: center; }
     .tl-running-spinner { display: inline-block; animation: spin 0.8s linear infinite; }
+
     .tl-body { flex: 1; min-width: 0; }
-    .tl-label { font-size: 12px; font-weight: 500; color: var(--text-primary); }
-    .tl-detail { font-size: 10.5px; color: var(--text-secondary); margin-top: 1px; font-family: var(--font-mono); }
-    .tl-time { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; }
+
+    /* FIX: tl-header row holds label + timestamp side by side */
+    .tl-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    /* FIX: Label wraps aggressively for long paths / repo names */
+    .tl-label {
+      flex: 1;
+      min-width: 0;
+      max-width: 100%;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-primary);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+    }
+
+    /* FIX: Detail wraps for long command output / Windows paths */
+    .tl-detail {
+      font-size: 10.5px;
+      color: var(--text-secondary);
+      margin-top: 1px;
+      font-family: var(--font-mono);
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    /* FIX: Timestamp never shrinks or wraps */
+    .tl-time {
+      flex-shrink: 0;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      white-space: nowrap;
+    }
 
     /* ─── Logs Panel ───────────────────────────────── */
     #logsPanel { padding: 0; display: none; flex-direction: column; }
@@ -250,7 +305,15 @@ export function getDashboardHTML(
     .cat-FRONTEND { background: rgba(79,142,247,0.12); color: var(--accent); }
     .cat-BACKEND  { background: rgba(52,201,123,0.1); color: var(--green); }
     .cat-ENV      { background: rgba(245,200,66,0.1); color: var(--yellow); }
-    .log-msg { flex: 1; word-break: break-all; }
+
+    /* FIX: Log message — clean wrap instead of break-all */
+    .log-msg {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
     .log-info    .log-msg { color: var(--text-primary); }
     .log-warn    .log-msg { color: var(--yellow); }
     .log-error   .log-msg { color: var(--red); }
@@ -849,16 +912,19 @@ export function getDashboardHTML(
     item.innerHTML = buildTimelineHTML(event);
   }
 
+  // FIX: Use .tl-header wrapper so label and timestamp share a row correctly
   function buildTimelineHTML(event) {
     const icons = { pending:'○', running:'<span class="tl-running-spinner">⟳</span>', success:'✓', error:'✗', skipped:'–' };
     const icon = icons[event.status] || '○';
     const timeStr = formatTime(event.timestamp);
     return '<span class="tl-icon">' + icon + '</span>' +
            '<div class="tl-body">' +
-           '  <div class="tl-label">' + escHtml(event.label) + '</div>' +
+           '  <div class="tl-header">' +
+           '    <div class="tl-label">' + escHtml(event.label) + '</div>' +
+           '    <span class="tl-time">' + timeStr + '</span>' +
+           '  </div>' +
               (event.detail ? '<div class="tl-detail">' + escHtml(event.detail) + '</div>' : '') +
-           '</div>' +
-           '<span class="tl-time">' + timeStr + '</span>';
+           '</div>';
   }
 
   // ── Log rendering ─────────────────────────────────
@@ -1000,7 +1066,6 @@ export function getDashboardHTML(
     });
   }
 
-  // FIXED: Standard settings logic safely mapping to VS Code
   function saveSettings() {
     const settings = collectSettings();
     vscode.postMessage({ type: 'saveSettings', payload: settings });
@@ -1031,7 +1096,6 @@ export function getDashboardHTML(
     return d.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
   }
 
-  // FIXED: Native replacement structure 
   function escHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

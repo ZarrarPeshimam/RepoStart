@@ -302,6 +302,8 @@ Move from onboarding automation to autonomous onboarding assistance.
 
 Contributions are welcome.
 
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines, setup instructions, and project roadmap areas.
+
 Areas for contribution:
 
 * Framework adapters
