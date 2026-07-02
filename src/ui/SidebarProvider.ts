@@ -132,6 +132,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this._runSetup();
   }
 
+  async triggerRunProject(): Promise<void> {
+    return this._runProject();
+  }
+
   dispose(): void {
     this._startupRunner?.killAll();
   }

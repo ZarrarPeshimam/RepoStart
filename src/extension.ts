@@ -34,7 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('repostart.runProject', async () => {
       vscode.commands.executeCommand('repostart.sidebarView.focus');
       await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      
+      sidebarProvider?.triggerRunProject();
     })
   );
 
