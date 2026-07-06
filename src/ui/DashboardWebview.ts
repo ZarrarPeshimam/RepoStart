@@ -275,6 +275,31 @@ export function getDashboardHTML(
       white-space: nowrap;
     }
 
+    /* ─── Search Bar ───────────────────────────── */
+.search-container {
+  margin-bottom: 10px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
     /* ─── Logs Panel ───────────────────────────────── */
     #logsPanel { padding: 0; display: none; flex-direction: column; }
     #logsPanel.active { display: flex; }
@@ -404,6 +429,16 @@ export function getDashboardHTML(
     </div>
 
     <div class="panel" id="timelinePanel">
+
+      <div class="search-container">
+         <input
+      type="text"
+      id="timelineSearch"
+      class="search-input"
+      placeholder="🔍 Search Timeline..."
+         />
+       </div>
+
       <div id="timelineContent">
         <div class="timeline-empty">
           <span style="font-size:24px;opacity:0.3">⏱</span>
@@ -413,7 +448,17 @@ export function getDashboardHTML(
     </div>
 
     <div class="panel" id="logsPanel">
-      <div class="logs-toolbar">
+
+  <div class="search-container">
+    <input
+      type="text"
+      id="logsSearch"
+      class="search-input"
+      placeholder="🔍 Search Logs..."
+    />
+  </div>
+
+  <div class="logs-toolbar">
         <span class="logs-count" id="logsCount">0 entries</span>
         <div class="logs-filters" id="logFilters">
           <span class="log-filter-btn active-filter" data-cat="ALL" onclick="setLogFilter('ALL')">ALL</span>
@@ -526,11 +571,25 @@ export function getDashboardHTML(
   let logCount      = 0;
   let timelineCount = 0;
   let isRunning     = false;
-  let timelineMap   = new Map();
+  let timelineMap = new Map();
+  let timelineEvents = [];
+  let timelineSearch = '';
+  
   let autoScrollLogs = true;
-  let logFilter     = 'ALL';
-  let allLogs       = [];
-  let currentAnalysis   = null;
+let logFilter = 'ALL';
+let allLogs = [];
+let timelineEvents = [];
+let timelineSearch = '';
+let logsSearch = '';
+
+let currentAnalysis = null;
+let serviceStatuses = {};
+let setupSummary = null;
+let currentEnvStatus = 'pending';
+let errorGuidances = [];
+
+let timelineSearchText = '';
+let logsSearchText = '';
   let serviceStatuses   = {};
   let setupSummary      = null;
   let currentEnvStatus  = 'pending';
@@ -888,44 +947,98 @@ export function getDashboardHTML(
   }
 
   // ── Timeline rendering ────────────────────────────
-  function renderTimelineEvent(event) {
-    timelineCount++;
-    bumpBadge('timeline');
-    const container = document.getElementById('timelineContent');
-    if (timelineCount === 1) {
-      container.innerHTML = '<div class="timeline-list" id="timelineList"></div>';
-    }
-    const list = document.getElementById('timelineList');
-    if (timelineMap.has(event.id)) { updateTimelineItem(event); return; }
-    const item = document.createElement('div');
-    item.id = 'tl-' + event.id;
-    item.className = 'timeline-item tl-' + event.status;
-    item.innerHTML = buildTimelineHTML(event);
-    list.appendChild(item);
-    timelineMap.set(event.id, item);
+  
+function renderTimelineEvent(event) {
+  timelineCount++;
+  bumpBadge('timeline');
+
+  const existing = timelineEvents.findIndex(function(e){
+    return e.id === event.id;
+  });
+
+  if (existing >= 0) {
+    timelineEvents[existing] = event;
+  } else {
+    timelineEvents.push(event);
   }
 
-  function updateTimelineItem(event) {
-    const item = document.getElementById('tl-' + event.id);
-    if (!item) return;
-    item.className = 'timeline-item tl-' + event.status;
-    item.innerHTML = buildTimelineHTML(event);
+  redrawTimeline();
+}
+
+
+function buildTimelineHTML(event) {
+  const icons = {
+    pending: '○',
+    running: '<span class="tl-running-spinner">⟳</span>',
+    success: '✓',
+    error: '✗',
+    skipped: '–'
+  };
+
+  return (
+    '<span class="tl-icon">' +
+    (icons[event.status] || '○') +
+    '</span>' +
+    '<div class="tl-body">' +
+    '<div class="tl-header">' +
+    '<div class="tl-label">' +
+    escHtml(event.label) +
+    '</div>' +
+    '<span class="tl-time">' +
+    formatTime(event.timestamp) +
+    '</span>' +
+    '</div>' +
+    (event.detail
+      ? '<div class="tl-detail">' +
+        escHtml(event.detail) +
+        '</div>'
+      : '') +
+    '</div>'
+  );
+}
+
+function redrawTimeline() {
+  const container = document.getElementById('timelineContent');
+
+  let events = timelineEvents;
+
+  if (timelineSearch) {
+    const q = timelineSearch.toLowerCase();
+
+    events = events.filter(function(e) {
+      return (
+        (e.label && e.label.toLowerCase().includes(q)) ||
+        (e.detail && e.detail.toLowerCase().includes(q))
+      );
+    });
   }
 
-  // FIX: Use .tl-header wrapper so label and timestamp share a row correctly
-  function buildTimelineHTML(event) {
-    const icons = { pending:'○', running:'<span class="tl-running-spinner">⟳</span>', success:'✓', error:'✗', skipped:'–' };
-    const icon = icons[event.status] || '○';
-    const timeStr = formatTime(event.timestamp);
-    return '<span class="tl-icon">' + icon + '</span>' +
-           '<div class="tl-body">' +
-           '  <div class="tl-header">' +
-           '    <div class="tl-label">' + escHtml(event.label) + '</div>' +
-           '    <span class="tl-time">' + timeStr + '</span>' +
-           '  </div>' +
-              (event.detail ? '<div class="tl-detail">' + escHtml(event.detail) + '</div>' : '') +
-           '</div>';
+  if (events.length === 0) {
+    container.innerHTML =
+      '<div class="timeline-empty">' +
+      '<span style="font-size:22px;opacity:.3">🔍</span>' +
+      '<span>No matching timeline events</span>' +
+      '</div>';
+    return;
   }
+
+  let html = '<div class="timeline-list">';
+
+  for (let i = 0; i < events.length; i++) {
+    html +=
+      '<div class="timeline-item tl-' +
+      events[i].status +
+      '">' +
+      buildTimelineHTML(events[i]) +
+      '</div>';
+  }
+
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+  
+  
 
   // ── Log rendering ─────────────────────────────────
   const ERROR_PATTERNS = [
@@ -956,7 +1069,22 @@ export function getDashboardHTML(
 
   function redrawLogs() {
     const list = document.getElementById('logsList');
-    const filtered = logFilter === 'ALL' ? allLogs : allLogs.filter(function(e) { return (e.category || 'SYSTEM') === logFilter; });
+    let filtered = logFilter === 'ALL'
+  ? allLogs
+  : allLogs.filter(function(e) {
+      return (e.category || 'SYSTEM') === logFilter;
+    });
+
+if (logsSearch) {
+  const q = logsSearch.toLowerCase();
+
+  filtered = filtered.filter(function(e) {
+    return (
+      (e.message || '').toLowerCase().includes(q) ||
+      (e.category || '').toLowerCase().includes(q)
+    );
+  });
+}
     if (filtered.length === 0) {
       list.innerHTML = '<div class="logs-empty"><span>No logs for this filter</span></div>';
       return;
@@ -1006,7 +1134,9 @@ export function getDashboardHTML(
   }
 
   function clearLogs() {
-    logCount = 0; allLogs = [];
+    logCount = 0;
+    allLogs = [];
+    logsSearch = "";
     document.getElementById('logsList').innerHTML =
       '<div class="logs-empty"><span style="font-size:22px;opacity:0.3">🖥</span><span>Logs cleared</span></div>';
     document.getElementById('logsCount').textContent = '0 entries';
@@ -1121,6 +1251,11 @@ export function getDashboardHTML(
         if (currentAnalysis) setStatus('status-running', 'Running setup…');
         switchTab('timeline');
         timelineCount = 0; timelineMap.clear();
+        timelineEvents = [];
+timelineSearch = "";
+
+const search = document.getElementById('timelineSearch');
+if (search) search.value = "";
         document.getElementById('timelineContent').innerHTML =
           '<div class="timeline-empty"><span style="font-size:24px;opacity:0.3">⏳</span>' +
           '<span style="font-size:12px">Starting…</span></div>';
@@ -1175,6 +1310,23 @@ export function getDashboardHTML(
   });
 
   // ── Init ──────────────────────────────────────────
+  const timelineSearchBox = document.getElementById('timelineSearch');
+
+if (timelineSearchBox) {
+  timelineSearchBox.addEventListener('input', function () {
+    timelineSearch = this.value;
+    redrawTimeline();
+  });
+}
+
+const logsSearchBox = document.getElementById('logsSearch');
+
+if (logsSearchBox) {
+  logsSearchBox.addEventListener('input', function () {
+    logsSearch = this.value;
+    redrawLogs();
+  });
+}
   vscode.postMessage({ type: 'ready' });
 </script>
 </body>
