@@ -6,8 +6,10 @@ import {
   Framework,
   PackageManager,
   RepoAnalysis,
+  PythonProject,
 } from '../types';
 import { fileExistsIn, listDir, pathExists, readJsonFile } from '../utils/fs';
+import { PythonEnvironmentManager } from '../runners/PythonEnvironmentManager';
 
 const CLIENT_DIRS = ['client', 'frontend', 'web', 'ui', 'app'];
 
@@ -222,6 +224,10 @@ export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis>
   const architecture: ArchitectureType =
     apps.length <= 1 ? 'single' : probe.type;
 
+  // Detect Python projects
+  const pythonEnvManager = new PythonEnvironmentManager(rootPath, null as any, null as any);
+  const pythonProjects: PythonProject[] = await pythonEnvManager.detectPythonProjects();
+
   const partial: Omit<RepoAnalysis, 'summary'> = {
     rootPath,
     architecture,
@@ -229,6 +235,7 @@ export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis>
     apps,
     hasRootPackageJson,
     envStatus: 'pending',
+    pythonProjects,
   };
 
   return {

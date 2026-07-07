@@ -12,6 +12,16 @@ export type Framework =
 
 export type ArchitectureType = 'single' | 'client-server' | 'multi-app' | 'unknown';
 
+export type PythonVenvStatus = 'created' | 'reused' | 'validated' | 'not-required' | 'error';
+
+export interface PythonProject {
+  rootPath: string;
+  relativePath: string;
+  venvPath: string | null;
+  venvStatus: PythonVenvStatus;
+  isValid: boolean;
+}
+
 export interface AppFolder {
   path: string;
   relativePath: string;
@@ -36,6 +46,7 @@ export interface RepoAnalysis {
   summary: string;
   hasRootPackageJson: boolean;
   envStatus: EnvStatus;
+  pythonProjects: PythonProject[];
 }
 
 export type TimelineEventStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
@@ -49,7 +60,7 @@ export interface TimelineEvent {
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'success' | 'system';
-export type LogCategory = 'SYSTEM' | 'SETUP' | 'FRONTEND' | 'BACKEND' | 'ENV';
+export type LogCategory = 'SYSTEM' | 'SETUP' | 'FRONTEND' | 'BACKEND' | 'ENV' | 'PYTHON';
 
 export interface LogEntry {
   id: string;

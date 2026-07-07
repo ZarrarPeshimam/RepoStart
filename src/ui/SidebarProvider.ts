@@ -7,6 +7,7 @@ import { LogStreamer } from '../services/LogStreamer';
 import { SetupEngine } from '../runners/SetupEngine';
 import { StartupRunner } from '../runners/StartupRunner';
 import { EnvBootstrap } from '../runners/EnvBootstrap';
+import { PythonEnvironmentManager } from '../runners/PythonEnvironmentManager';
 import { SettingsManager } from '../services/SettingsManager';
 import {
   AppFolder,
@@ -277,6 +278,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this._analysis = analysis;
       this._postMessage({ type: 'analysisResult', payload: analysis });
       this._postMessage({ type: 'envStatusUpdate', payload: envStatus });
+
+      // Setup Python virtual environments if Python projects are detected
+      if (analysis.pythonProjects && analysis.pythonProjects.length > 0) {
+        const pythonEv = timeline.addEvent('Setting up Python environments', 'running');
+        const pythonEnvManager = new PythonEnvironmentManager(rootPath, timeline, streamer);
+        await pythonEnvManager.setupPythonEnvironments(analysis.pythonProjects);
+        
+        const allValid = analysis.pythonProjects.every(p => p.isValid);
+        timeline.updateEvent(
+          pythonEv.id,
+          allValid ? 'success' : 'error',
+          `${analysis.pythonProjects.length} Python project(s) processed`
+        );
+        
+        // Update analysis with Python project status
+        this._analysis = analysis;
+        this._postMessage({ type: 'analysisResult', payload: analysis });
+      }
 
       if (settings.autoRunAfterSetup) {
         await this._launchApps(analysis.apps, timeline, streamer, settings);
