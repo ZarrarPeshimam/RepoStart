@@ -19,8 +19,8 @@ const VENV_DIRS = ['.venv', 'venv', 'env'];
 export class PythonEnvironmentManager {
   constructor(
     private rootPath: string,
-    private timeline: ActivityTimeline,
-    private streamer: LogStreamer
+    private timeline: ActivityTimeline | null,
+    private streamer: LogStreamer | null
   ) {}
 
   async detectPythonProjects(): Promise<PythonProject[]> {
@@ -73,8 +73,8 @@ export class PythonEnvironmentManager {
     dirPath: string,
     relativePath: string
   ): Promise<PythonProject | null> {
-    this.streamer.system(`✓ Python project detected`, 'python');
-    this.streamer.system(`✓ Python root identified: ${relativePath}/`, 'python');
+    this.streamer?.system(`✓ Python project detected`, 'python');
+    this.streamer?.system(`✓ Python root identified: ${relativePath}/`, 'python');
 
     const venvPath = await this.detectVirtualEnvironment(dirPath);
     
@@ -82,14 +82,14 @@ export class PythonEnvironmentManager {
     let isValid = false;
 
     if (venvPath) {
-      this.streamer.system(`✓ Existing virtual environment found`, 'python');
+      this.streamer?.system(`✓ Existing virtual environment found`, 'python');
       isValid = await this.validateVirtualEnvironment(venvPath);
       
       if (isValid) {
         venvStatus = 'validated';
-        this.streamer.system(`✓ Virtual environment validated`, 'python');
+        this.streamer?.system(`✓ Virtual environment validated`, 'python');
       } else {
-        this.streamer.system(`✗ Virtual environment invalid or corrupted`, 'python');
+        this.streamer?.system(`✗ Virtual environment invalid or corrupted`, 'python');
         // Treat invalid environment as missing
         return {
           rootPath: dirPath,
@@ -136,28 +136,30 @@ export class PythonEnvironmentManager {
   private async setupProjectEnvironment(project: PythonProject): Promise<void> {
     // If already has a valid venv, reuse it
     if (project.venvPath && project.isValid) {
-      this.streamer.system(
+      this.streamer?.system(
         `Python Environment: Existing (${path.basename(project.venvPath)})`,
         'python'
       );
-      this.streamer.system(`Status: Reused`, 'python');
+      this.streamer?.system(`Status: Reused`, 'python');
       
-      const ev = this.timeline.addEvent(
+      const ev = this.timeline?.addEvent(
         `Reusing existing virtual environment [${project.relativePath}]`,
         'success'
       );
-      this.timeline.updateEvent(
-        ev.id,
-        'success',
-        `Reused ${path.basename(project.venvPath)} in ${project.relativePath}`
-      );
+      if (ev) {
+        this.timeline?.updateEvent(
+          ev.id,
+          'success',
+          `Reused ${path.basename(project.venvPath)} in ${project.relativePath}`
+        );
+      }
       return;
     }
 
     // Create new virtual environment
-    this.streamer.system(`✓ Creating Python virtual environment`, 'python');
+    this.streamer?.system(`✓ Creating Python virtual environment`, 'python');
     
-    const ev = this.timeline.addEvent(
+    const ev = this.timeline?.addEvent(
       `Creating Python virtual environment [${project.relativePath}]`,
       'running'
     );
@@ -167,58 +169,65 @@ export class PythonEnvironmentManager {
       const cmd = 'python -m venv .venv';
       const source = `python venv [${project.relativePath}]`;
 
-      this.streamer.system(
+      this.streamer?.system(
         `[PYTHON] Creating virtual environment in ${project.relativePath}…`,
         source
       );
 
-      const exitCode = await this.streamer.run(cmd, project.rootPath, source);
+      const exitCode = this.streamer ? await this.streamer.run(cmd, project.rootPath, source) : 1;
 
       if (exitCode === 0) {
-        this.streamer.system(
+        this.streamer?.system(
           `✓ Virtual environment created successfully`,
           'python'
         );
-        this.streamer.system(
+        this.streamer?.system(
           `Python Environment: .venv`,
           'python'
         );
-        this.streamer.system(`Status: Created`, 'python');
+        this.streamer?.system(`Status: Created`, 'python');
 
-        this.timeline.updateEvent(
-          ev.id,
-          'success',
-          `.venv created in ${project.relativePath}`
-        );
+        if (ev) {
+          this.timeline?.updateEvent(
+            ev.id,
+            'success',
+            `.venv created in ${project.relativePath}`
+          );
+        }
 
         // Update project with new venv info
         project.venvPath = venvPath;
         project.venvStatus = 'created';
         project.isValid = true;
       } else {
-        this.streamer.system(
+        this.streamer?.system(
           `✗ Failed to create virtual environment`,
           'python'
         );
-        this.timeline.updateEvent(
-          ev.id,
-          'error',
-          `Failed to create venv in ${project.relativePath}`
-        );
+        if (ev) {
+          this.timeline?.updateEvent(
+            ev.id,
+            'error',
+            `Failed to create venv in ${project.relativePath}`
+          );
+        }
 
         project.venvStatus = 'error';
         project.isValid = false;
       }
+
     } catch (err) {
-      this.streamer.system(
+      this.streamer?.system(
         `✗ Error creating virtual environment: ${(err as Error).message}`,
         'python'
       );
-      this.timeline.updateEvent(
-        ev.id,
-        'error',
-        (err as Error).message
-      );
+      if (ev) {
+        this.timeline?.updateEvent(
+          ev.id,
+          'error',
+          (err as Error).message
+        );
+      }
 
       project.venvStatus = 'error';
       project.isValid = false;
