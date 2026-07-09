@@ -407,15 +407,24 @@ export function getDashboardHTML(
   </div>
 
   <div id="tabs">
-    <div class="tab active" onclick="switchTab('overview')" id="tab-overview">Overview</div>
-    <div class="tab" onclick="switchTab('timeline')" id="tab-timeline">
-      Timeline <span class="tab-badge" id="timelineBadge" style="display:none">0</span>
-    </div>
-    <div class="tab" onclick="switchTab('logs')" id="tab-logs">
-      Logs <span class="tab-badge" id="logsBadge" style="display:none">0</span>
-    </div>
-    <div class="tab" onclick="switchTab('settings')" id="tab-settings">⚙</div>
+  <div class="tab active" onclick="switchTab('overview')" id="tab-overview">
+    Overview
   </div>
+
+  <div class="tab" onclick="switchTab('timeline')" id="tab-timeline">
+    Timeline
+    <span class="tab-badge" id="timelineBadge" style="display:none">0</span>
+  </div>
+
+  <div class="tab" onclick="switchTab('logs')" id="tab-logs">
+    Logs
+    <span class="tab-badge" id="logsBadge" style="display:none">0</span>
+  </div>
+
+  <div class="tab" onclick="switchTab('settings')" id="tab-settings">
+    ⚙
+  </div>
+</div>
 
   <div id="content">
 
@@ -572,27 +581,21 @@ export function getDashboardHTML(
   let timelineCount = 0;
   let isRunning     = false;
   let timelineMap = new Map();
-  let timelineEvents = [];
-  let timelineSearch = '';
-  
-  let autoScrollLogs = true;
-let logFilter = 'ALL';
-let allLogs = [];
+
 let timelineEvents = [];
 let timelineSearch = '';
 let logsSearch = '';
+
+let autoScrollLogs = true;
+let logFilter = 'ALL';
+let allLogs = [];
 
 let currentAnalysis = null;
 let serviceStatuses = {};
 let setupSummary = null;
 let currentEnvStatus = 'pending';
-let errorGuidances = [];
 
-let timelineSearchText = '';
-let logsSearchText = '';
-  let serviceStatuses   = {};
-  let setupSummary      = null;
-  let currentEnvStatus  = 'pending';
+
   let errorGuidances    = [];
 
   // ── Tab switching ─────────────────────────────────
