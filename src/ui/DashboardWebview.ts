@@ -276,29 +276,50 @@ export function getDashboardHTML(
     }
 
     /* ─── Search Bar ───────────────────────────── */
-.search-container {
-  margin-bottom: 10px;
-}
+    .search-container {
+      position: relative;
+      margin-bottom: 10px;
+    }
 
-.search-input {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font-size: 12px;
-  outline: none;
-  transition: border-color var(--transition);
-}
+    .search-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 7px 32px 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      font-size: 12px;
+      outline: none;
+      transition: border-color var(--transition);
+    }
 
-.search-input:focus {
-  border-color: var(--accent);
-}
+    .clear-search-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: none;
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+    }
 
-.search-input::placeholder {
-  color: var(--text-muted);
-}
+    .clear-search-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+    }
+
+    .search-input::placeholder {
+      color: var(--text-muted);
+    }
 
     /* ─── Logs Panel ───────────────────────────────── */
     #logsPanel { padding: 0; display: none; flex-direction: column; }
@@ -391,7 +412,6 @@ export function getDashboardHTML(
     <div class="logo">
       <img src="${iconUri}" class="logo-icon" alt="RepoStart" />
       <span class="logo-text">RepoStart</span>
-      
     </div>
 
     <div style="display:flex; gap:8px; align-items:center;">
@@ -407,24 +427,24 @@ export function getDashboardHTML(
   </div>
 
   <div id="tabs">
-  <div class="tab active" onclick="switchTab('overview')" id="tab-overview">
-    Overview
-  </div>
+    <div class="tab active" onclick="switchTab('overview')" id="tab-overview">
+      Overview
+    </div>
 
-  <div class="tab" onclick="switchTab('timeline')" id="tab-timeline">
-    Timeline
-    <span class="tab-badge" id="timelineBadge" style="display:none">0</span>
-  </div>
+    <div class="tab" onclick="switchTab('timeline')" id="tab-timeline">
+      Timeline
+      <span class="tab-badge" id="timelineBadge" style="display:none">0</span>
+    </div>
 
-  <div class="tab" onclick="switchTab('logs')" id="tab-logs">
-    Logs
-    <span class="tab-badge" id="logsBadge" style="display:none">0</span>
-  </div>
+    <div class="tab" onclick="switchTab('logs')" id="tab-logs">
+      Logs
+      <span class="tab-badge" id="logsBadge" style="display:none">0</span>
+    </div>
 
-  <div class="tab" onclick="switchTab('settings')" id="tab-settings">
-    ⚙
+    <div class="tab" onclick="switchTab('settings')" id="tab-settings">
+      ⚙
+    </div>
   </div>
-</div>
 
   <div id="content">
 
@@ -440,13 +460,28 @@ export function getDashboardHTML(
     <div class="panel" id="timelinePanel">
 
       <div class="search-container">
-         <input
-      type="text"
-      id="timelineSearch"
-      class="search-input"
-      placeholder="🔍 Search Timeline..."
-         />
-       </div>
+        <input
+          type="text"
+          id="timelineSearch"
+          class="search-input"
+          placeholder="Search Timeline..."
+        />
+        <button
+          id="clearTimelineSearch"
+          class="clear-search-btn"
+          hidden
+          aria-label="Clear search"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24">
+            <path
+              d="M18 6L6 18M6 6l12 12"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      </div>
 
       <div id="timelineContent">
         <div class="timeline-empty">
@@ -458,16 +493,31 @@ export function getDashboardHTML(
 
     <div class="panel" id="logsPanel">
 
-  <div class="search-container">
-    <input
-      type="text"
-      id="logsSearch"
-      class="search-input"
-      placeholder="🔍 Search Logs..."
-    />
-  </div>
+      <div class="search-container">
+        <input
+          type="text"
+          id="logsSearch"
+          class="search-input"
+          placeholder="Search Logs..."
+        />
+        <button
+          id="clearLogsSearch"
+          class="clear-search-btn"
+          hidden
+          aria-label="Clear search"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24">
+            <path
+              d="M18 6L6 18M6 6l12 12"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      </div>
 
-  <div class="logs-toolbar">
+      <div class="logs-toolbar">
         <span class="logs-count" id="logsCount">0 entries</span>
         <div class="logs-filters" id="logFilters">
           <span class="log-filter-btn active-filter" data-cat="ALL" onclick="setLogFilter('ALL')">ALL</span>
@@ -478,12 +528,14 @@ export function getDashboardHTML(
         </div>
         <button class="clear-btn" onclick="clearLogs()">Clear</button>
       </div>
+
       <div id="logsList">
         <div class="logs-empty">
           <span style="font-size:22px;opacity:0.3">🖥</span>
           <span>Logs will appear here</span>
         </div>
       </div>
+
     </div>
 
     <div class="panel" id="settingsPanel">
@@ -494,20 +546,35 @@ export function getDashboardHTML(
         <div class="setting-row" onclick="toggleSetting('autoRunAfterSetup')">
           <div>
             <div class="setting-label">Auto Run After Setup</div>
-            <div class="setting-desc">Automatically launch apps after setup completes</div>
+            <div class="setting-desc">
+              Automatically launch apps after setup completes
+            </div>
           </div>
+
           <label class="toggle" onclick="event.stopPropagation()">
-            <input type="checkbox" id="cfg-autoRunAfterSetup" onchange="onSettingChange()">
+            <input
+              type="checkbox"
+              id="cfg-autoRunAfterSetup"
+              onchange="onSettingChange()"
+            />
             <span class="toggle-track"></span>
           </label>
         </div>
+
         <div class="setting-row" onclick="toggleSetting('autoGenerateEnv')">
           <div>
             <div class="setting-label">Auto Generate Environment</div>
-            <div class="setting-desc">Copy .env.example → .env if .env doesn't exist</div>
+            <div class="setting-desc">
+              Copy .env.example → .env if .env doesn't exist
+            </div>
           </div>
+
           <label class="toggle" onclick="event.stopPropagation()">
-            <input type="checkbox" id="cfg-autoGenerateEnv" onchange="onSettingChange()">
+            <input
+              type="checkbox"
+              id="cfg-autoGenerateEnv"
+              onchange="onSettingChange()"
+            />
             <span class="toggle-track"></span>
           </label>
         </div>
@@ -515,33 +582,57 @@ export function getDashboardHTML(
 
       <div class="settings-section">
         <div class="settings-section-title">Launch Options</div>
+
         <div class="setting-row" onclick="toggleSetting('autoLaunchFrontend')">
           <div>
             <div class="setting-label">Auto Launch Frontend</div>
-            <div class="setting-desc">Start frontend terminal on Run Project</div>
+            <div class="setting-desc">
+              Start frontend terminal on Run Project
+            </div>
           </div>
+
           <label class="toggle" onclick="event.stopPropagation()">
-            <input type="checkbox" id="cfg-autoLaunchFrontend" onchange="onSettingChange()">
+            <input
+              type="checkbox"
+              id="cfg-autoLaunchFrontend"
+              onchange="onSettingChange()"
+            />
             <span class="toggle-track"></span>
           </label>
         </div>
+
         <div class="setting-row" onclick="toggleSetting('autoLaunchBackend')">
           <div>
             <div class="setting-label">Auto Launch Backend</div>
-            <div class="setting-desc">Start backend terminal on Run Project</div>
+            <div class="setting-desc">
+              Start backend terminal on Run Project
+            </div>
           </div>
+
           <label class="toggle" onclick="event.stopPropagation()">
-            <input type="checkbox" id="cfg-autoLaunchBackend" onchange="onSettingChange()">
+            <input
+              type="checkbox"
+              id="cfg-autoLaunchBackend"
+              onchange="onSettingChange()"
+            />
             <span class="toggle-track"></span>
           </label>
         </div>
+
         <div class="setting-row" onclick="toggleSetting('autoOpenDashboard')">
           <div>
             <div class="setting-label">Auto Open Dashboard</div>
-            <div class="setting-desc">Focus RepoStart when workspace opens</div>
+            <div class="setting-desc">
+              Focus RepoStart when workspace opens
+            </div>
           </div>
+
           <label class="toggle" onclick="event.stopPropagation()">
-            <input type="checkbox" id="cfg-autoOpenDashboard" onchange="onSettingChange()">
+            <input
+              type="checkbox"
+              id="cfg-autoOpenDashboard"
+              onchange="onSettingChange()"
+            />
             <span class="toggle-track"></span>
           </label>
         </div>
@@ -549,29 +640,41 @@ export function getDashboardHTML(
 
       <div class="settings-section">
         <div class="settings-section-title">Notifications</div>
+
         <div class="setting-row" onclick="toggleSetting('showNotifications')">
           <div>
             <div class="setting-label">Show Notifications</div>
-            <div class="setting-desc">VS Code info/warning messages from RepoStart</div>
+            <div class="setting-desc">
+              VS Code info/warning messages from RepoStart
+            </div>
           </div>
+
           <label class="toggle" onclick="event.stopPropagation()">
-            <input type="checkbox" id="cfg-showNotifications" onchange="onSettingChange()">
+            <input
+              type="checkbox"
+              id="cfg-showNotifications"
+              onchange="onSettingChange()"
+            />
             <span class="toggle-track"></span>
           </label>
         </div>
       </div>
 
       <div class="settings-save-row">
-        <button class="btn btn-primary" style="width:100%" onclick="saveSettings()">
+        <button
+          class="btn btn-primary"
+          style="width:100%"
+          onclick="saveSettings()"
+        >
           Save Settings
         </button>
       </div>
     </div>
-
   </div>
 </div>
 
 <script>
+
   // ── VS Code API ──────────────────────────────────
   const vscode = acquireVsCodeApi();
 
@@ -582,21 +685,19 @@ export function getDashboardHTML(
   let isRunning     = false;
   let timelineMap = new Map();
 
-let timelineEvents = [];
-let timelineSearch = '';
-let logsSearch = '';
+  let timelineEvents = [];
+  let timelineSearch = '';
+  let logsSearch = '';
 
-let autoScrollLogs = true;
-let logFilter = 'ALL';
-let allLogs = [];
+  let autoScrollLogs = true;
+  let logFilter = 'ALL';
+  let allLogs = [];
 
-let currentAnalysis = null;
-let serviceStatuses = {};
-let setupSummary = null;
-let currentEnvStatus = 'pending';
-
-
-  let errorGuidances    = [];
+  let currentAnalysis = null;
+  let serviceStatuses = {};
+  let setupSummary = null;
+  let currentEnvStatus = 'pending';
+  let errorGuidances = [];
 
   // ── Tab switching ─────────────────────────────────
   function switchTab(name) {
@@ -632,6 +733,8 @@ let currentEnvStatus = 'pending';
   function handleRunProject() {
     vscode.postMessage({ type: 'runProject' });
   }
+  window.handleRunSetup = handleRunSetup;
+  window.handleRunProject = handleRunProject;
 
   function setRunning(running) {
     isRunning = running;
@@ -950,98 +1053,105 @@ let currentEnvStatus = 'pending';
   }
 
   // ── Timeline rendering ────────────────────────────
-  
-function renderTimelineEvent(event) {
-  timelineCount++;
-  bumpBadge('timeline');
 
-  const existing = timelineEvents.findIndex(function(e){
-    return e.id === event.id;
-  });
+  function renderTimelineEvent(event) {
+    timelineCount++;
+    bumpBadge('timeline');
 
-  if (existing >= 0) {
-    timelineEvents[existing] = event;
-  } else {
-    timelineEvents.push(event);
-  }
-
-  redrawTimeline();
-}
-
-
-function buildTimelineHTML(event) {
-  const icons = {
-    pending: '○',
-    running: '<span class="tl-running-spinner">⟳</span>',
-    success: '✓',
-    error: '✗',
-    skipped: '–'
-  };
-
-  return (
-    '<span class="tl-icon">' +
-    (icons[event.status] || '○') +
-    '</span>' +
-    '<div class="tl-body">' +
-    '<div class="tl-header">' +
-    '<div class="tl-label">' +
-    escHtml(event.label) +
-    '</div>' +
-    '<span class="tl-time">' +
-    formatTime(event.timestamp) +
-    '</span>' +
-    '</div>' +
-    (event.detail
-      ? '<div class="tl-detail">' +
-        escHtml(event.detail) +
-        '</div>'
-      : '') +
-    '</div>'
-  );
-}
-
-function redrawTimeline() {
-  const container = document.getElementById('timelineContent');
-
-  let events = timelineEvents;
-
-  if (timelineSearch) {
-    const q = timelineSearch.toLowerCase();
-
-    events = events.filter(function(e) {
-      return (
-        (e.label && e.label.toLowerCase().includes(q)) ||
-        (e.detail && e.detail.toLowerCase().includes(q))
-      );
+    const existing = timelineEvents.findIndex(function(e){
+      return e.id === event.id;
     });
+
+    if (existing >= 0) {
+      timelineEvents[existing] = event;
+    } else {
+      timelineEvents.push(event);
+    }
+
+    redrawTimeline();
   }
 
-  if (events.length === 0) {
-    container.innerHTML =
-      '<div class="timeline-empty">' +
-      '<span style="font-size:22px;opacity:.3">🔍</span>' +
-      '<span>No matching timeline events</span>' +
-      '</div>';
-    return;
+  function buildTimelineHTML(event) {
+    const icons = {
+      pending: '○',
+      running: '<span class="tl-running-spinner">⟳</span>',
+      success: '✓',
+      error: '✗',
+      skipped: '–'
+    };
+
+    return (
+      '<span class="tl-icon">' +
+      (icons[event.status] || '○') +
+      '</span>' +
+      '<div class="tl-body">' +
+      '<div class="tl-header">' +
+      '<div class="tl-label">' +
+      escHtml(event.label) +
+      '</div>' +
+      '<span class="tl-time">' +
+      formatTime(event.timestamp) +
+      '</span>' +
+      '</div>' +
+      (event.detail
+        ? '<div class="tl-detail">' +
+          escHtml(event.detail) +
+          '</div>'
+        : '') +
+      '</div>'
+    );
   }
 
-  let html = '<div class="timeline-list">';
+  function redrawTimeline() {
+    const container = document.getElementById('timelineContent');
 
-  for (let i = 0; i < events.length; i++) {
-    html +=
-      '<div class="timeline-item tl-' +
-      events[i].status +
-      '">' +
-      buildTimelineHTML(events[i]) +
-      '</div>';
+    let events = timelineEvents;
+
+    if (timelineSearch) {
+      const q = timelineSearch.toLowerCase();
+
+      events = events.filter(function(e) {
+        return (
+          (e.label && e.label.toLowerCase().includes(q)) ||
+          (e.detail && e.detail.toLowerCase().includes(q))
+        );
+      });
+    }
+
+    if (events.length === 0) {
+      if (timelineSearch) {
+        container.innerHTML =
+          '<div class="timeline-empty">' +
+          '<svg width="22" height="22" viewBox="0 0 24 24" style="opacity:.3">' +
+          '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"></circle>' +
+          '<path d="M20 20L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>' +
+          '</svg>' +
+          '<span>No matching timeline events</span>' +
+          '</div>';
+      } else {
+        container.innerHTML =
+          '<div class="timeline-empty">' +
+          '<span>No timeline events yet</span>' +
+          '</div>';
+      }
+      return;
+    }
+
+    let html = '<div class="timeline-list">';
+
+    for (let i = 0; i < events.length; i++) {
+      html +=
+        '<div class="timeline-item tl-' +
+        events[i].status +
+        '">' +
+        buildTimelineHTML(events[i]) +
+        '</div>';
+    }
+
+    html += '</div>';
+
+    container.innerHTML = html;
   }
-
-  html += '</div>';
-
-  container.innerHTML = html;
-}
-  
-  
 
   // ── Log rendering ─────────────────────────────────
   const ERROR_PATTERNS = [
@@ -1073,26 +1183,39 @@ function redrawTimeline() {
   function redrawLogs() {
     const list = document.getElementById('logsList');
     let filtered = logFilter === 'ALL'
-  ? allLogs
-  : allLogs.filter(function(e) {
-      return (e.category || 'SYSTEM') === logFilter;
-    });
+      ? allLogs
+      : allLogs.filter(function(e) {
+          return (e.category || 'SYSTEM') === logFilter;
+        });
 
-if (logsSearch) {
-  const q = logsSearch.toLowerCase();
+    if (logsSearch) {
+      const q = logsSearch.toLowerCase();
 
-  filtered = filtered.filter(function(e) {
-    return (
-      (e.message || '').toLowerCase().includes(q) ||
-      (e.category || '').toLowerCase().includes(q)
-    );
-  });
-}
+      filtered = filtered.filter(function(e) {
+        return (
+          (e.message || '').toLowerCase().includes(q) ||
+          (e.category || '').toLowerCase().includes(q)
+        );
+      });
+    }
+
     if (filtered.length === 0) {
-      list.innerHTML = '<div class="logs-empty"><span>No logs for this filter</span></div>';
+      if (logsSearch) {
+        list.innerHTML =
+          '<div class="logs-empty">' +
+          '<svg width="20" height="20" viewBox="0 0 24 24" fill="none">' +
+          '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>' +
+          '<line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+          '</svg>' +
+          '<span>No matching logs</span>' +
+          '</div>';
+      } else {
+        list.innerHTML =
+          '<div class="logs-empty"><span>No logs for this filter</span></div>';
+      }
       return;
     }
-    
+
     let html = '';
     for (let i = 0; i < filtered.length; i++) {
       html += buildLogHTML(filtered[i]);
@@ -1140,6 +1263,13 @@ if (logsSearch) {
     logCount = 0;
     allLogs = [];
     logsSearch = "";
+
+    const search = document.getElementById('logsSearch');
+    if (search) search.value = "";
+
+    const clearBtn = document.getElementById('clearLogsSearch');
+    if (clearBtn) clearBtn.hidden = true;
+
     document.getElementById('logsList').innerHTML =
       '<div class="logs-empty"><span style="font-size:22px;opacity:0.3">🖥</span><span>Logs cleared</span></div>';
     document.getElementById('logsCount').textContent = '0 entries';
@@ -1160,22 +1290,22 @@ if (logsSearch) {
   };
 
   function applySettings(settings) {
-  for (let i = 0; i < SETTING_KEYS.length; i++) {
-    const key = SETTING_KEYS[i];
-    const el = document.getElementById('cfg-' + key);
+    for (let i = 0; i < SETTING_KEYS.length; i++) {
+      const key = SETTING_KEYS[i];
+      const el = document.getElementById('cfg-' + key);
 
-    if (!el) continue;
+      if (!el) continue;
 
-    el.checked = settings[key] !== undefined
-      ? !!settings[key]
-      : DEFAULTS[key];
+      el.checked = settings[key] !== undefined
+        ? !!settings[key]
+        : DEFAULTS[key];
+    }
+
+    document.querySelectorAll('.setting-row').forEach(function(row) {
+      const cb = row.querySelector('input[type="checkbox"]');
+      if (cb) row.classList.toggle('active', cb.checked);
+    });
   }
-
-  document.querySelectorAll('.setting-row').forEach(function(row) {
-    const cb = row.querySelector('input[type="checkbox"]');
-    if (cb) row.classList.toggle('active', cb.checked);
-  });
-}
 
   function collectSettings() {
     const s = {};
@@ -1204,13 +1334,7 @@ if (logsSearch) {
     vscode.postMessage({ type: 'saveSettings', payload: settings });
   }
 
-  document.getElementById('cfg-autoRunAfterSetup').onchange = onSettingChange;
-  document.getElementById('cfg-autoGenerateEnv').onchange = onSettingChange;
-  document.getElementById('cfg-autoLaunchFrontend').onchange = onSettingChange;
-  document.getElementById('cfg-autoLaunchBackend').onchange = onSettingChange;
-  document.getElementById('cfg-autoOpenDashboard').onchange = onSettingChange;
-  document.getElementById('cfg-showNotifications').onchange = onSettingChange;
-
+  // ── Downloads ──────────────────────────────────────
   function downloadSetupReport() {
     vscode.postMessage({ type: 'downloadReport' });
   }
@@ -1255,10 +1379,15 @@ if (logsSearch) {
         switchTab('timeline');
         timelineCount = 0; timelineMap.clear();
         timelineEvents = [];
-timelineSearch = "";
+        timelineSearch = "";
 
-const search = document.getElementById('timelineSearch');
-if (search) search.value = "";
+        {
+          const search = document.getElementById('timelineSearch');
+          const clearBtn = document.getElementById('clearTimelineSearch');
+          if (search) search.value = "";
+          if (clearBtn) clearBtn.hidden = true;
+        }
+
         document.getElementById('timelineContent').innerHTML =
           '<div class="timeline-empty"><span style="font-size:24px;opacity:0.3">⏳</span>' +
           '<span style="font-size:12px">Starting…</span></div>';
@@ -1313,24 +1442,60 @@ if (search) search.value = "";
   });
 
   // ── Init ──────────────────────────────────────────
-  const timelineSearchBox = document.getElementById('timelineSearch');
+  window.onload = function () {
 
-if (timelineSearchBox) {
-  timelineSearchBox.addEventListener('input', function () {
-    timelineSearch = this.value;
-    redrawTimeline();
-  });
-}
+    // Settings toggles
+    const settingIds = ['cfg-autoRunAfterSetup','cfg-autoGenerateEnv','cfg-autoLaunchFrontend',
+                         'cfg-autoLaunchBackend','cfg-autoOpenDashboard','cfg-showNotifications'];
+    settingIds.forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.onchange = onSettingChange;
+    });
 
-const logsSearchBox = document.getElementById('logsSearch');
+    // Timeline search
+    const timelineSearchBox = document.getElementById('timelineSearch');
+    const clearTimelineSearch = document.getElementById('clearTimelineSearch');
 
-if (logsSearchBox) {
-  logsSearchBox.addEventListener('input', function () {
-    logsSearch = this.value;
-    redrawLogs();
-  });
-}
-  vscode.postMessage({ type: 'ready' });
+    if (timelineSearchBox) {
+      timelineSearchBox.addEventListener('input', function () {
+        timelineSearch = this.value;
+        if (clearTimelineSearch) clearTimelineSearch.hidden = this.value.length === 0;
+        redrawTimeline();
+      });
+    }
+
+    if (clearTimelineSearch) {
+      clearTimelineSearch.addEventListener('click', function () {
+        if (timelineSearchBox) timelineSearchBox.value = "";
+        timelineSearch = "";
+        clearTimelineSearch.hidden = true;
+        redrawTimeline();
+      });
+    }
+
+    // Logs search
+    const logsSearchBox = document.getElementById('logsSearch');
+    const clearLogsSearch = document.getElementById('clearLogsSearch');
+
+    if (logsSearchBox) {
+      logsSearchBox.addEventListener('input', function () {
+        logsSearch = this.value;
+        if (clearLogsSearch) clearLogsSearch.hidden = this.value.length === 0;
+        redrawLogs();
+      });
+    }
+
+    if (clearLogsSearch) {
+      clearLogsSearch.addEventListener('click', function () {
+        if (logsSearchBox) logsSearchBox.value = "";
+        logsSearch = "";
+        clearLogsSearch.hidden = true;
+        redrawLogs();
+      });
+    }
+
+    vscode.postMessage({ type: 'ready' });
+  };
 </script>
 </body>
 </html>`;
