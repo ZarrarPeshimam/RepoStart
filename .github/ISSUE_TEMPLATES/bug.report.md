@@ -63,5 +63,3 @@ If applicable, add screenshots or screen recordings to help explain the problem.
 Add any other information, logs, links, or details that may help maintainers understand and resolve the issue.
 
 ---
-
-❤️ Thank you for helping improve the project!

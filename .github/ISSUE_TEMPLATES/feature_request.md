@@ -68,5 +68,3 @@ Add mockups, screenshots, or diagrams that help explain your idea.
 Add any additional information or references here.
 
 ---
-
-🚀 Thank you for helping us make this project even better!

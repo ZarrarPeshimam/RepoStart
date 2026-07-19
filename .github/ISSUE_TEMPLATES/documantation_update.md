@@ -58,5 +58,3 @@ If applicable, include screenshots that highlight the documentation issue.
 Add any additional information or references.
 
 ---
-
-📖 Thank you for helping make our documentation better for everyone!
