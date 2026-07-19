@@ -47,5 +47,3 @@ closes : #
 - [ ] This pull request is ready for review.
 
 ---
-
-❤️ Thank you for contributing!
