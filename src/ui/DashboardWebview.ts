@@ -42,6 +42,17 @@ export function getDashboardHTML(
       --transition:   160ms ease;
     }
 
+    :root[data-theme="light"] {
+      --bg:           #f5f6f8;
+      --bg-card:      #ffffff;
+      --bg-hover:     #eceff3;
+      --border:       #e1e4ea;
+      --border-light: #d3d8e0;
+      --text-primary: #1a1f29;
+      --text-secondary: #5b6472;
+      --text-muted:   #8a94a3;
+    }
+
     html, body { background: var(--bg); color: var(--text-primary); font-family: var(--font-ui);
       font-size: 13px; line-height: 1.5; height: 100%; overflow: hidden; }
 
@@ -419,6 +430,10 @@ export function getDashboardHTML(
     </div>
 
     <div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn btn-secondary" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme">
+        <span class="btn-icon" id="themeIcon">🌙</span>
+      </button>
+
       <button class="btn btn-primary" id="runSetupBtn" onclick="handleRunSetup()">
         <span class="btn-icon">▶</span> Setup
       </button>
@@ -427,7 +442,6 @@ export function getDashboardHTML(
         <span class="btn-icon">▶</span> Run
       </button>
     </div>
-
   </div>
 
   <div id="tabs">
@@ -679,9 +693,31 @@ export function getDashboardHTML(
 
 <script>
 
-  // ── VS Code API ──────────────────────────────────
+// ── VS Code API ──────────────────────────────────
   const vscode = acquireVsCodeApi();
 
+  // ── Theme ─────────────────────────────────────────
+  function initTheme() {
+    const saved = localStorage.getItem('repostart-theme') || 'dark';
+    setTheme(saved);
+  }
+
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = current === 'light' ? 'dark' : 'light';
+    setTheme(next);
+    localStorage.setItem('repostart-theme', next);
+  }
+
+  function setTheme(theme) {
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    const icon = document.getElementById('themeIcon');
+    if (icon) icon.textContent = theme === 'light' ? '☀️' : '🌙';
+  }
   // ── State ─────────────────────────────────────────
   let activeTab     = 'overview';
   let logCount      = 0;
@@ -1446,10 +1482,11 @@ export function getDashboardHTML(
   });
 
   // ── Init ──────────────────────────────────────────
-  window.onload = function () {
+window.onload = function () {
 
-    // Settings toggles
-    const settingIds = ['cfg-autoRunAfterSetup','cfg-autoGenerateEnv','cfg-autoLaunchFrontend',
+    initTheme();
+
+    // Settings toggles    const settingIds = ['cfg-autoRunAfterSetup','cfg-autoGenerateEnv','cfg-autoLaunchFrontend',
                          'cfg-autoLaunchBackend','cfg-autoOpenDashboard','cfg-showNotifications'];
     settingIds.forEach(function(id) {
       const el = document.getElementById(id);
