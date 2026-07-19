@@ -324,6 +324,10 @@ export function getDashboardHTML(
     /* ─── Logs Panel ───────────────────────────────── */
     #logsPanel { padding: 0; display: none; flex-direction: column; }
     #logsPanel.active { display: flex; }
+    /* Keep the Logs search bar visually consistent with the Timeline search bar.
+       Timeline gets its inset from .panel's default padding; #logsPanel zeroes
+       that out for the toolbar/list layout, so the search bar needs its own inset. */
+    #logsPanel .search-container { padding: 12px 12px 0; margin-bottom: 4px; }
     .logs-toolbar { display: flex; align-items: center; justify-content: space-between;
       padding: 7px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 8px; }
     .logs-count { font-size: 11px; color: var(--text-secondary); }
