@@ -888,12 +888,10 @@ export function getDashboardHTML(
     for (let i = 0; i < keys.length; i++) {
       const rel = keys[i];
       const s = serviceStatuses[rel];
-      const dotClass = s.state === 'running' ? 'svc-running' : s.state === 'starting' ? 'svc-starting' : 'svc-stopped';
       const stateLabel = s.state === 'running' ? '🟢 Running' : s.state === 'starting' ? '🟡 Starting' : '🔴 Stopped';
       cardsHTML += '<div class="service-card">' +
                    '  <span class="service-label">' + escHtml(s.label) + '</span>' +
                    '  <span class="service-state">' +
-                   '    <span class="svc-dot ' + dotClass + '"></span>' +
                         stateLabel +
                    '  </span>' +
                    '</div>';
