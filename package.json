@@ -75,6 +75,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
+    "test:python": "npm run compile && node out/test/verifyPythonOnboarding.js",
     "lint": "eslint src --ext ts",
     "package": "vsce package"
   },

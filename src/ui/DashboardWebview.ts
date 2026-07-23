@@ -788,6 +788,37 @@ export function getDashboardHTML(
       ? '<span style="color:var(--text-muted);font-size:11px">Pending</span>'
       : '<span class="badge badge-env-none">Not Required</span>';
 
+    let pythonRowsHTML = '';
+    if (analysis.pythonProjects && analysis.pythonProjects.length > 0) {
+      for (let i = 0; i < analysis.pythonProjects.length; i++) {
+        const p = analysis.pythonProjects[i];
+        const venvName = p.venvName || '.venv';
+        const label = analysis.pythonProjects.length > 1 ? 'Python Env (' + p.relativePath + ')' : 'Python Environment';
+        
+        let statusText = '';
+        let badgeClass = 'badge-env-none';
+        if (p.venvStatus === 'Created') {
+          statusText = venvName + ' (Created)';
+          badgeClass = 'badge-env-ok';
+        } else if (p.venvStatus === 'Reused') {
+          statusText = 'Existing (' + venvName + ') - Reused';
+          badgeClass = 'badge-env-ok';
+        } else if (p.venvStatus === 'Validated') {
+          statusText = 'Existing (' + venvName + ') - Validated';
+          badgeClass = 'badge-env-ok';
+        } else {
+          statusText = 'Pending';
+          badgeClass = 'badge-env-none';
+        }
+
+        pythonRowsHTML += 
+          '      <div class="info-row">' +
+          '        <span class="info-label">' + label + '</span>' +
+          '        <span class="info-value"><span class="badge ' + badgeClass + '">' + escHtml(statusText) + '</span></span>' +
+          '      </div>';
+      }
+    }
+
     const svcHTML = renderServiceStatusSection();
     const structHTML = renderStructureViz(analysis);
     const summaryHTML = renderSummarySection();
@@ -827,6 +858,7 @@ export function getDashboardHTML(
       '        <span class="info-label">Environment</span>' +
       '        <span class="info-value">' + envHTML + '</span>' +
       '      </div>' +
+             pythonRowsHTML +
       '    </div>' +
       '    <div id="statusRow" class="status-row" style="margin-top:10px">' +
       '      <div class="status-dot status-idle"></div>' +
@@ -1017,6 +1049,36 @@ export function getDashboardHTML(
     }
 
     const s = setupSummary;
+    let pythonSummaryHTML = '';
+    const pyProjects = s.pythonProjects || (currentAnalysis && currentAnalysis.pythonProjects) || [];
+    if (pyProjects.length > 0) {
+      for (let i = 0; i < pyProjects.length; i++) {
+        const p = pyProjects[i];
+        const venvName = p.venvName || '.venv';
+        const label = pyProjects.length > 1 ? 'Python Env (' + p.relativePath + ')' : 'Python Environment';
+        
+        let displayVal = '—';
+        let valClass = 'val-skip';
+        
+        if (p.venvStatus === 'Created') {
+          displayVal = venvName + ' (Created)';
+          valClass = 'val-ok';
+        } else if (p.venvStatus === 'Reused') {
+          displayVal = 'Existing (' + venvName + ') - Reused';
+          valClass = 'val-ok';
+        } else if (p.venvStatus === 'Validated') {
+          displayVal = 'Existing (' + venvName + ') - Validated';
+          valClass = 'val-ok';
+        }
+
+        pythonSummaryHTML += 
+          '  <div class="summary-row">' +
+          '    <span class="summary-label">' + label + '</span>' +
+          '    <span class="summary-val ' + valClass + '">' + escHtml(displayVal) + '</span>' +
+          '  </div>';
+      }
+    }
+
     return '<div class="summary-grid">' +
            '  <div class="summary-row">' +
            '    <span class="summary-label">Dependencies Installed</span>' +
@@ -1026,6 +1088,7 @@ export function getDashboardHTML(
            '    <span class="summary-label">Environment Generated</span>' +
            '    <span class="summary-val ' + (s.envGenerated ? 'val-ok' : 'val-skip') + '">' + (s.envGenerated ? '✓' : '—') + '</span>' +
            '  </div>' +
+           pythonSummaryHTML +
            '  <div class="summary-row">' +
            '    <span class="summary-label">Applications Started</span>' +
            '    <span class="summary-val ' + (s.appsStarted ? 'val-ok' : 'val-fail') + '">' + (s.appsStarted ? '✓' : '✗') + '</span>' +

@@ -28,6 +28,13 @@ export interface AppFolder {
 
 export type EnvStatus = 'configured' | 'not-required' | 'pending';
 
+export interface PythonProject {
+  path: string;
+  relativePath: string;
+  venvName?: string;
+  venvStatus?: 'Created' | 'Reused' | 'Validated';
+}
+
 export interface RepoAnalysis {
   rootPath: string;
   architecture: ArchitectureType;
@@ -36,6 +43,7 @@ export interface RepoAnalysis {
   summary: string;
   hasRootPackageJson: boolean;
   envStatus: EnvStatus;
+  pythonProjects?: PythonProject[];
 }
 
 export type TimelineEventStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
@@ -74,6 +82,7 @@ export interface SetupSummary {
   envGenerated: boolean;
   appsStarted: boolean;
   errorCount: number;
+  pythonProjects?: PythonProject[];
 }
 
 export interface RepoStartSettings {
