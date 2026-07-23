@@ -37,13 +37,23 @@ export function getDashboardHTML(
       --text-muted:   #4a5568;
       --font-mono:    'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
       --font-ui:      -apple-system, 'Segoe UI', system-ui, sans-serif;
-      --radius:       8px;
+--radius:       8px;
       --radius-sm:    5px;
       --transition:   160ms ease;
     }
 
-    html, body { background: var(--bg); color: var(--text-primary); font-family: var(--font-ui);
-      font-size: 13px; line-height: 1.5; height: 100%; overflow: hidden; }
+    html[data-theme="light"] {
+      --bg:           #ffffff;
+      --bg-card:      #f6f8fa;
+      --bg-hover:     #edf0f3;
+      --border:       #d8dee5;
+      --border-light: #e3e7ec;
+      --text-primary: #1b1f24;
+      --text-secondary: #57606a;
+      --text-muted:   #8b95a1;
+    }
+
+    html, body { background: var(--bg); color: var(--text-primary); font-family: var(--font-ui);      font-size: 13px; line-height: 1.5; height: 100%; overflow: hidden; }
 
     /* ─── Layout ───────────────────────────────────── */
     #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -418,11 +428,14 @@ export function getDashboardHTML(
       <span class="logo-text">RepoStart</span>
     </div>
 
-    <div style="display:flex; gap:8px; align-items:center;">
+<div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn btn-secondary" id="themeToggleBtn" onclick="cycleThemeMode()" title="Theme: Auto">
+        <span id="themeToggleIcon">🖥</span>
+      </button>
+
       <button class="btn btn-primary" id="runSetupBtn" onclick="handleRunSetup()">
         <span class="btn-icon">▶</span> Setup
       </button>
-
       <button class="btn btn-green" id="runProjectBtn" onclick="handleRunProject()">
         <span class="btn-icon">▶</span> Run
       </button>
@@ -1278,9 +1291,42 @@ export function getDashboardHTML(
     resetBadge('logs');
   }
 
+// ── Theme ──────────────────────────────────────────
+  let currentThemeMode = 'auto'; // 'auto' | 'light' | 'dark'
+
+  function systemPrefersLight() {
+    // VS Code adds one of these classes to <body> based on the active editor theme
+    return document.body.classList.contains('vscode-light');
+  }
+
+  function applyTheme(mode) {
+    currentThemeMode = mode;
+    const resolved = mode === 'auto' ? (systemPrefersLight() ? 'light' : 'dark') : mode;
+
+    if (resolved === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+
+    const icon = document.getElementById('themeToggleIcon');
+    const btn = document.getElementById('themeToggleBtn');
+    if (icon && btn) {
+      if (mode === 'auto') { icon.textContent = '🖥'; btn.title = 'Theme: Auto'; }
+      else if (mode === 'light') { icon.textContent = '☀'; btn.title = 'Theme: Light'; }
+      else { icon.textContent = '🌙'; btn.title = 'Theme: Dark'; }
+    }
+  }
+
+  function cycleThemeMode() {
+    const order = ['auto', 'light', 'dark'];
+    const next = order[(order.indexOf(currentThemeMode) + 1) % order.length];
+    applyTheme(next);
+    vscode.postMessage({ type: 'saveSettings', payload: Object.assign(collectSettings(), { theme: next }) });
+  }
+
   // ── Settings ──────────────────────────────────────
-  const SETTING_KEYS = ['autoRunAfterSetup','autoGenerateEnv','autoLaunchFrontend',
-                        'autoLaunchBackend','autoOpenDashboard','showNotifications'];
+  const SETTING_KEYS = ['autoRunAfterSetup','autoGenerateEnv','autoLaunchFrontend',                        'autoLaunchBackend','autoOpenDashboard','showNotifications'];
 
   const DEFAULTS = {
     autoRunAfterSetup: true,
@@ -1437,10 +1483,10 @@ export function getDashboardHTML(
         }
         break;
 
-      case 'settingsLoaded':
+case 'settingsLoaded':
         applySettings(msg.payload);
-        break;
-    }
+        applyTheme(msg.payload.theme || 'auto');
+        break;    }
   });
 
   // ── Init ──────────────────────────────────────────
@@ -1496,9 +1542,14 @@ export function getDashboardHTML(
       });
     }
 
+// Re-apply theme automatically when the user changes their VS Code
+    // color theme, but only while RepoStart's mode is set to "Auto".
+    new MutationObserver(function () {
+      if (currentThemeMode === 'auto') applyTheme('auto');
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
     vscode.postMessage({ type: 'ready' });
-  };
-</script>
+  };</script>
 </body>
 </html>`;
 }
