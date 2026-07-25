@@ -96,6 +96,16 @@ export function getDashboardHTML(
       color: var(--yellow); }
     .btn-icon { font-size: 13px; }
 
+    /* ─── Theme Select ─────────────────────────────── */
+    .theme-select {
+      background: var(--bg-hover); color: var(--text-primary);
+      border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+      font-size: 12px; font-family: var(--font-ui); font-weight: 600;
+      padding: 5px 10px; cursor: pointer; outline: none;
+    }
+    .theme-select:hover { border-color: var(--accent); }
+    .theme-select:focus { border-color: var(--accent); }
+
     /* ─── Tabs ─────────────────────────────────────── */
     #tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg);
       flex-shrink: 0; padding: 0 8px; }
@@ -429,10 +439,6 @@ export function getDashboardHTML(
     </div>
 
 <div style="display:flex; gap:8px; align-items:center;">
-      <button class="btn btn-secondary" id="themeToggleBtn" onclick="cycleThemeMode()" title="Theme: Auto">
-        <span id="themeToggleIcon">🖥</span>
-      </button>
-
       <button class="btn btn-primary" id="runSetupBtn" onclick="handleRunSetup()">
         <span class="btn-icon">▶</span> Setup
       </button>
@@ -555,8 +561,26 @@ export function getDashboardHTML(
 
     </div>
 
-    <div class="panel" id="settingsPanel">
+   <div class="panel" id="settingsPanel">
       <div class="section-header">⚙ RepoStart Settings</div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Appearance</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Theme</div>
+            <div class="setting-desc">
+              Auto follows your current VS Code color theme
+            </div>
+          </div>
+
+          <select id="cfg-theme" class="theme-select" onchange="onThemeSelectChange()">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+      </div>
 
       <div class="settings-section">
         <div class="settings-section-title">Setup Behaviour</div>
@@ -1309,22 +1333,16 @@ export function getDashboardHTML(
       document.documentElement.removeAttribute('data-theme');
     }
 
-    const icon = document.getElementById('themeToggleIcon');
-    const btn = document.getElementById('themeToggleBtn');
-    if (icon && btn) {
-      if (mode === 'auto') { icon.textContent = '🖥'; btn.title = 'Theme: Auto'; }
-      else if (mode === 'light') { icon.textContent = '☀'; btn.title = 'Theme: Light'; }
-      else { icon.textContent = '🌙'; btn.title = 'Theme: Dark'; }
-    }
+    const select = document.getElementById('cfg-theme');
+    if (select) select.value = mode;
   }
 
-  function cycleThemeMode() {
-    const order = ['auto', 'light', 'dark'];
-    const next = order[(order.indexOf(currentThemeMode) + 1) % order.length];
+  function onThemeSelectChange() {
+    const select = document.getElementById('cfg-theme');
+    const next = select ? select.value : 'auto';
     applyTheme(next);
     vscode.postMessage({ type: 'saveSettings', payload: Object.assign(collectSettings(), { theme: next }) });
   }
-
   // ── Settings ──────────────────────────────────────
   const SETTING_KEYS = ['autoRunAfterSetup','autoGenerateEnv','autoLaunchFrontend',                        'autoLaunchBackend','autoOpenDashboard','showNotifications'];
 
