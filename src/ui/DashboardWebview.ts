@@ -136,8 +136,10 @@ export function getDashboardHTML(
     .info-value { font-size: 11px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 5px; }
 
     /* ─── Badges ───────────────────────────────────── */
-    .badge { font-size: 10px; font-weight: 600; padding: 2px 7px;
-      border-radius: 20px; text-transform: capitalize; }
+    .badge { font-size: 10px; font-weight: 600; padding: 4px 10px;
+      border-radius: 20px; text-transform: capitalize;
+      display: inline-flex; align-items: center; justify-content: center; text-align: center;
+      line-height: 1.2; }
     .badge-arch-single   { background: rgba(168,124,255,0.12); color: var(--purple); border: 1px solid rgba(168,124,255,0.2); }
     .badge-arch-client-server { background: rgba(79,142,247,0.12); color: var(--accent); border: 1px solid rgba(79,142,247,0.2); }
     .badge-arch-multi-app { background: rgba(52,201,123,0.12); color: var(--green); border: 1px solid rgba(52,201,123,0.2); }
@@ -145,8 +147,8 @@ export function getDashboardHTML(
       color: var(--yellow); border: 1px solid var(--border-light); }
     .badge-fw-front { background: rgba(79,142,247,0.12); color: var(--accent); border: 1px solid rgba(79,142,247,0.2); }
     .badge-fw-back  { background: rgba(52,201,123,0.1); color: var(--green); border: 1px solid rgba(52,201,123,0.2); }
-    .badge-env-ok   { background: rgba(52,201,123,0.12); color: var(--green); }
-    .badge-env-none { background: var(--bg-hover); color: var(--text-muted); }
+    .badge-env-ok   { background: rgba(52,201,123,0.12); color: var(--green); border: 1px solid rgba(52,201,123,0.2); }
+    .badge-env-none { background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border-light); }
 
     /* ─── Status row ───────────────────────────────── */
     .status-row { display: flex; align-items: center; gap: 6px; margin-top: 8px;
