@@ -8,6 +8,7 @@ import { SetupEngine } from '../runners/SetupEngine';
 import { StartupRunner } from '../runners/StartupRunner';
 import { EnvBootstrap } from '../runners/EnvBootstrap';
 import { SettingsManager } from '../services/SettingsManager';
+import { PythonEnvEngine } from '../runners/PythonEnvEngine';
 import {
   AppFolder,
   EnvStatus,
@@ -184,7 +185,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const settings = this._getSettings();
 
     this._setupRunning = true;
-    this._summary = { depsInstalled: false, envGenerated: false, appsStarted: false, errorCount: 0 };
+    this._summary = { depsInstalled: false, envGenerated: false, appsStarted: false, errorCount: 0, pythonProjects: [] };
     this._serviceStatuses = [];
     this._timelineEvents = [];
     this._logs = [];
@@ -236,39 +237,69 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const pmEv = timeline.addEvent('✓ Package manager detected', 'success');
       timeline.updateEvent(pmEv.id, 'success', analysis.packageManager);
 
-      streamer.system(`Architecture: ${analysis.architecture} · ${analysis.apps.length} app(s)`);
+      const hasApps = analysis.apps && analysis.apps.length > 0;
+      const hasPython = analysis.pythonProjects && analysis.pythonProjects.length > 0;
+      streamer.system(`Architecture: ${analysis.architecture} · ${analysis.apps.length} Node app(s) · ${analysis.pythonProjects?.length || 0} Python project(s)`);
+      
+      const appPaths = [
+        ...analysis.apps.map((a) => a.relativePath),
+        ...(analysis.pythonProjects || []).map((p) => p.relativePath),
+      ].join(', ');
+
       timeline.updateEvent(
         archEvent.id,
         'success',
-        `${analysis.architecture} — ${analysis.apps.map((a) => a.relativePath).join(', ')}`
+        `${analysis.architecture} — ${appPaths}`
       );
 
-      if (analysis.apps.length === 0) {
-        timeline.updateEvent(archEvent.id, 'error', 'No Node.js packages found');
-        throw new Error('No installable packages detected in this repository.');
+      if (!hasApps && !hasPython) {
+        timeline.updateEvent(archEvent.id, 'error', 'No Node.js packages or Python projects found');
+        throw new Error('No installable packages or Python projects detected in this repository.');
       }
 
-      const setupEngine = new SetupEngine({ apps: analysis.apps, timeline, streamer });
-      const installResult = await setupEngine.run();
-
-      this._summary.depsInstalled = installResult.success;
-      if (!installResult.success) {
-        this._summary.errorCount++;
-        const settings2 = this._getSettings();
-        if (settings2.showNotifications) {
-          vscode.window.showWarningMessage(
-            `RepoStart: Install failed for: ${installResult.failedFolders.join(', ')}. Check Logs tab.`
-          );
+      let depsInstalled = true;
+      if (hasApps) {
+        const setupEngine = new SetupEngine({ apps: analysis.apps, timeline, streamer });
+        const installResult = await setupEngine.run();
+        depsInstalled = installResult.success;
+        if (!installResult.success) {
+          this._summary.errorCount++;
+          const settings2 = this._getSettings();
+          if (settings2.showNotifications) {
+            vscode.window.showWarningMessage(
+              `RepoStart: Install failed for: ${installResult.failedFolders.join(', ')}. Check Logs tab.`
+            );
+          }
         }
       }
+      this._summary.depsInstalled = depsInstalled;
 
       let envStatus: EnvStatus = 'not-required';
       if (settings.autoGenerateEnv) {
-        const envBootstrap = new EnvBootstrap(rootPath, timeline, streamer, analysis.apps);
-        envStatus = await envBootstrap.run();
+        if (hasApps) {
+          const envBootstrap = new EnvBootstrap(rootPath, timeline, streamer, analysis.apps);
+          envStatus = await envBootstrap.run();
+        }
       } else {
         const ev = timeline.addEvent('Environment generation disabled in settings', 'skipped');
         timeline.updateEvent(ev.id, 'skipped');
+      }
+
+      let updatedPythonProjects = analysis.pythonProjects || [];
+      if (hasPython) {
+        const pythonEnvEngine = new PythonEnvEngine({
+          pythonProjects: analysis.pythonProjects || [],
+          timeline,
+          streamer,
+        });
+        updatedPythonProjects = await pythonEnvEngine.run();
+        analysis.pythonProjects = updatedPythonProjects;
+        this._summary.pythonProjects = updatedPythonProjects;
+        this._analysis = analysis;
+        this._postMessage({ type: 'analysisResult', payload: analysis });
+
+        const pythonErrors = updatedPythonProjects.filter(p => p.venvStatus === undefined).length;
+        this._summary.errorCount += pythonErrors;
       }
 
       this._summary.envGenerated = envStatus === 'configured';
@@ -429,6 +460,35 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       '── Environment ────────────────────────────',
       `Environment:      ${analysis.envStatus === 'configured' ? '✓ Configured' : 'Not Required'}`,
       '',
+      ...(analysis.pythonProjects && analysis.pythonProjects.length > 0 ? [
+        '── Python Environments ────────────────────',
+        ...analysis.pythonProjects.flatMap((p) => {
+          const venvName = p.venvName || '.venv';
+          const rootSuffix = p.relativePath === '.' ? '' : ` (${p.relativePath})`;
+          if (p.venvStatus === 'Created') {
+            return [
+              `Python Environment: ${venvName}${rootSuffix}`,
+              `Status:             Created`
+            ];
+          } else if (p.venvStatus === 'Reused') {
+            return [
+              `Python Environment: Existing (${venvName})${rootSuffix}`,
+              `Status:             Reused`
+            ];
+          } else if (p.venvStatus === 'Validated') {
+            return [
+              `Python Environment: Existing (${venvName})${rootSuffix}`,
+              `Status:             Validated`
+            ];
+          } else {
+            return [
+              `Python Environment: ${venvName}${rootSuffix}`,
+              `Status:             Pending`
+            ];
+          }
+        }),
+        ''
+      ] : []),
       '── Setup Results ──────────────────────────',
       `Dependencies:     ${this._summary.depsInstalled ? '✓ Installed' : '✗ Failed'}`,
       `Environment:      ${this._summary.envGenerated  ? '✓ Generated' : 'Not Required'}`,

@@ -6,6 +6,7 @@ import {
   Framework,
   PackageManager,
   RepoAnalysis,
+  PythonProject,
 } from '../types';
 import { fileExistsIn, listDir, pathExists, readJsonFile } from '../utils/fs';
 
@@ -172,7 +173,15 @@ async function probeArchitecture(rootPath: string): Promise<ArchitectureProbe> {
 }
 
 function buildSummary(analysis: Omit<RepoAnalysis, 'summary'>): string {
-  const { architecture, apps, packageManager } = analysis;
+  const { architecture, apps, packageManager, pythonProjects } = analysis;
+
+  if (apps.length === 0 && pythonProjects && pythonProjects.length > 0) {
+    if (pythonProjects.length === 1) {
+      return `Single Python project`;
+    } else {
+      return `Multi-Service Python Repository · ${pythonProjects.length} services`;
+    }
+  }
 
   if (architecture === 'single') {
     const app = apps[0];
@@ -196,6 +205,91 @@ function buildSummary(analysis: Omit<RepoAnalysis, 'summary'>): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const PYTHON_INDICATORS = ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile', 'poetry.lock'];
+const VENV_NAMES = ['.venv', 'venv', 'env'];
+
+async function isPythonProjectDir(dir: string): Promise<boolean> {
+  for (const indicator of PYTHON_INDICATORS) {
+    if (await fileExistsIn(dir, indicator)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function detectVenv(projectDir: string): Promise<{ name: string; isValid: boolean } | null> {
+  for (const name of VENV_NAMES) {
+    const venvPath = path.join(projectDir, name);
+    if (await pathExists(venvPath)) {
+      const interpreterName = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+      const interpreterPath = path.join(venvPath, interpreterName);
+      const isValid = await pathExists(interpreterPath);
+      return { name, isValid };
+    }
+  }
+  return null;
+}
+
+export async function detectPythonProjects(rootPath: string): Promise<PythonProject[]> {
+  const projects: PythonProject[] = [];
+
+  if (await isPythonProjectDir(rootPath)) {
+    projects.push({
+      path: rootPath,
+      relativePath: '.',
+    });
+  }
+
+  const entries = await listDir(rootPath);
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const nameLower = entry.name.toLowerCase();
+      const subPath = path.join(rootPath, entry.name);
+
+      if (MULTI_DIRS.includes(nameLower)) {
+        const subEntries = await listDir(subPath);
+        for (const subEntry of subEntries) {
+          if (subEntry.isDirectory()) {
+            const innerPath = path.join(subPath, subEntry.name);
+            if (await isPythonProjectDir(innerPath)) {
+              projects.push({
+                path: innerPath,
+                relativePath: `${entry.name}/${subEntry.name}`,
+              });
+            }
+          }
+        }
+      } else {
+        if (await isPythonProjectDir(subPath)) {
+          projects.push({
+            path: subPath,
+            relativePath: entry.name,
+          });
+        }
+      }
+    }
+  }
+
+  const uniqueProjects: PythonProject[] = [];
+  const seenPaths = new Set<string>();
+  for (const p of projects) {
+    if (!seenPaths.has(p.path)) {
+      seenPaths.add(p.path);
+      uniqueProjects.push(p);
+    }
+  }
+
+  for (const project of uniqueProjects) {
+    const venv = await detectVenv(project.path);
+    if (venv && venv.isValid) {
+      project.venvName = venv.name;
+      project.venvStatus = 'Validated';
+    }
+  }
+
+  return uniqueProjects;
 }
 
 export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis> {
@@ -222,6 +316,8 @@ export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis>
   const architecture: ArchitectureType =
     apps.length <= 1 ? 'single' : probe.type;
 
+  const pythonProjects = await detectPythonProjects(rootPath);
+
   const partial: Omit<RepoAnalysis, 'summary'> = {
     rootPath,
     architecture,
@@ -229,6 +325,7 @@ export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis>
     apps,
     hasRootPackageJson,
     envStatus: 'pending',
+    pythonProjects,
   };
 
   return {
