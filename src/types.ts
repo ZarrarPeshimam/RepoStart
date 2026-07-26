@@ -85,6 +85,8 @@ export interface SetupSummary {
   pythonProjects?: PythonProject[];
 }
 
+export type ThemeMode = 'auto' | 'light' | 'dark';
+
 export interface RepoStartSettings {
   autoRunAfterSetup: boolean;
   autoGenerateEnv: boolean;
@@ -92,6 +94,7 @@ export interface RepoStartSettings {
   autoLaunchBackend: boolean;
   autoOpenDashboard: boolean;
   showNotifications: boolean;
+  theme: ThemeMode;
 }
 
 export const DEFAULT_SETTINGS: RepoStartSettings = {
@@ -101,6 +104,7 @@ export const DEFAULT_SETTINGS: RepoStartSettings = {
   autoLaunchBackend: true,
   autoOpenDashboard: true,
   showNotifications: false,  
+  theme: 'auto',
 };
 
 export type ExtensionToWebviewMessage =

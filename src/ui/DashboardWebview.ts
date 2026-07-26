@@ -37,13 +37,23 @@ export function getDashboardHTML(
       --text-muted:   #4a5568;
       --font-mono:    'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
       --font-ui:      -apple-system, 'Segoe UI', system-ui, sans-serif;
-      --radius:       8px;
+--radius:       8px;
       --radius-sm:    5px;
       --transition:   160ms ease;
     }
 
-    html, body { background: var(--bg); color: var(--text-primary); font-family: var(--font-ui);
-      font-size: 13px; line-height: 1.5; height: 100%; overflow: hidden; }
+    html[data-theme="light"] {
+      --bg:           #ffffff;
+      --bg-card:      #f6f8fa;
+      --bg-hover:     #edf0f3;
+      --border:       #d8dee5;
+      --border-light: #e3e7ec;
+      --text-primary: #1b1f24;
+      --text-secondary: #57606a;
+      --text-muted:   #8b95a1;
+    }
+
+    html, body { background: var(--bg); color: var(--text-primary); font-family: var(--font-ui);      font-size: 13px; line-height: 1.5; height: 100%; overflow: hidden; }
 
     /* ─── Layout ───────────────────────────────────── */
     #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -85,6 +95,16 @@ export function getDashboardHTML(
     .btn.running { background: var(--bg-card); border: 1px solid var(--border-light);
       color: var(--yellow); }
     .btn-icon { font-size: 13px; }
+
+    /* ─── Theme Select ─────────────────────────────── */
+    .theme-select {
+      background: var(--bg-hover); color: var(--text-primary);
+      border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+      font-size: 12px; font-family: var(--font-ui); font-weight: 600;
+      padding: 5px 10px; cursor: pointer; outline: none;
+    }
+    .theme-select:hover { border-color: var(--accent); }
+    .theme-select:focus { border-color: var(--accent); }
 
     /* ─── Tabs ─────────────────────────────────────── */
     #tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg);
@@ -420,11 +440,10 @@ export function getDashboardHTML(
       <span class="logo-text">RepoStart</span>
     </div>
 
-    <div style="display:flex; gap:8px; align-items:center;">
+<div style="display:flex; gap:8px; align-items:center;">
       <button class="btn btn-primary" id="runSetupBtn" onclick="handleRunSetup()">
         <span class="btn-icon">▶</span> Setup
       </button>
-
       <button class="btn btn-green" id="runProjectBtn" onclick="handleRunProject()">
         <span class="btn-icon">▶</span> Run
       </button>
@@ -544,8 +563,26 @@ export function getDashboardHTML(
 
     </div>
 
-    <div class="panel" id="settingsPanel">
+   <div class="panel" id="settingsPanel">
       <div class="section-header">⚙ RepoStart Settings</div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Appearance</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Theme</div>
+            <div class="setting-desc">
+              Auto follows your current VS Code color theme
+            </div>
+          </div>
+
+          <select id="cfg-theme" class="theme-select" onchange="onThemeSelectChange()">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+      </div>
 
       <div class="settings-section">
         <div class="settings-section-title">Setup Behaviour</div>
@@ -1343,9 +1380,36 @@ export function getDashboardHTML(
     resetBadge('logs');
   }
 
+// ── Theme ──────────────────────────────────────────
+  let currentThemeMode = 'auto'; // 'auto' | 'light' | 'dark'
+
+  function systemPrefersLight() {
+    // VS Code adds one of these classes to <body> based on the active editor theme
+    return document.body.classList.contains('vscode-light');
+  }
+
+  function applyTheme(mode) {
+    currentThemeMode = mode;
+    const resolved = mode === 'auto' ? (systemPrefersLight() ? 'light' : 'dark') : mode;
+
+    if (resolved === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+
+    const select = document.getElementById('cfg-theme');
+    if (select) select.value = mode;
+  }
+
+  function onThemeSelectChange() {
+    const select = document.getElementById('cfg-theme');
+    const next = select ? select.value : 'auto';
+    applyTheme(next);
+    vscode.postMessage({ type: 'saveSettings', payload: Object.assign(collectSettings(), { theme: next }) });
+  }
   // ── Settings ──────────────────────────────────────
-  const SETTING_KEYS = ['autoRunAfterSetup','autoGenerateEnv','autoLaunchFrontend',
-                        'autoLaunchBackend','autoOpenDashboard','showNotifications'];
+  const SETTING_KEYS = ['autoRunAfterSetup','autoGenerateEnv','autoLaunchFrontend',                        'autoLaunchBackend','autoOpenDashboard','showNotifications'];
 
   const DEFAULTS = {
     autoRunAfterSetup: true,
@@ -1502,10 +1566,10 @@ export function getDashboardHTML(
         }
         break;
 
-      case 'settingsLoaded':
+case 'settingsLoaded':
         applySettings(msg.payload);
-        break;
-    }
+        applyTheme(msg.payload.theme || 'auto');
+        break;    }
   });
 
   // ── Init ──────────────────────────────────────────
@@ -1561,9 +1625,14 @@ export function getDashboardHTML(
       });
     }
 
+// Re-apply theme automatically when the user changes their VS Code
+    // color theme, but only while RepoStart's mode is set to "Auto".
+    new MutationObserver(function () {
+      if (currentThemeMode === 'auto') applyTheme('auto');
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
     vscode.postMessage({ type: 'ready' });
-  };
-</script>
+  };</script>
 </body>
 </html>`;
 }
