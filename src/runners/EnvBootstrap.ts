@@ -90,7 +90,9 @@ export class EnvBootstrap {
         const ev = this.timeline.addEvent(`Backed up .env [${label}]`, 'success');
         this.timeline.updateEvent(ev.id, 'success', `Backup created: ${path.basename(backupPath)}`);
       } catch (err) {
-        this.streamer.system(`✗ Failed to backup .env in [${label}]: ${(err as Error).message}`, 'repostart');
+        this.streamer.system(`✗ Failed to backup .env in [${label}]: ${(err as Error).message}. Aborting overwrite.`, 'repostart');
+        this.timeline.addEvent(`Backup failed, aborting overwrite [${label}]`, 'error');
+        return 'configured';
       }
     }
 
