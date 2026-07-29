@@ -13,7 +13,7 @@ export class EnvBootstrap {
     private apps?: AppFolder[]
   ) {}
 
-  async run(): Promise<EnvStatus> {
+  async run(forceOverwrite = false): Promise<EnvStatus> {
     const dirsToCheck: Array<{ absPath: string; label: string }> = [
       { absPath: this.rootPath, label: '.' },
     ];
@@ -29,7 +29,7 @@ export class EnvBootstrap {
     let anyConfigured = false;
 
     for (const { absPath, label } of dirsToCheck) {
-      const result = await this._bootstrapDir(absPath, label);
+      const result = await this._bootstrapDir(absPath, label, forceOverwrite);
       if (result === 'configured') {
         anyConfigured = true;
       }
@@ -38,14 +38,40 @@ export class EnvBootstrap {
     return anyConfigured ? 'configured' : 'not-required';
   }
 
-  private async _bootstrapDir(dir: string, label: string): Promise<EnvStatus> {
+  async restore(dir: string, label: string = path.basename(dir)): Promise<boolean> {
+    try {
+      const files = await fs.promises.readdir(dir);
+      const backups = files.filter(f => f.startsWith('.env.backup-')).sort();
+      
+      if (backups.length === 0) {
+        this.streamer.system(`No backups found in [${label}]`, 'repostart');
+        return false;
+      }
+      
+      const latestBackup = backups[backups.length - 1];
+      const envPath = path.join(dir, '.env');
+      const backupPath = path.join(dir, latestBackup);
+      
+      await fs.promises.copyFile(backupPath, envPath);
+      
+      this.streamer.system(`✓ Restored .env from ${latestBackup} in [${label}]`, 'repostart');
+      const ev = this.timeline.addEvent(`Restored .env from ${latestBackup} [${label}]`, 'success');
+      this.timeline.updateEvent(ev.id, 'success', `Restored .env from ${latestBackup} in ${label}`);
+      return true;
+    } catch (err) {
+      this.streamer.system(`✗ Failed to restore .env in [${label}]: ${(err as Error).message}`, 'repostart');
+      return false;
+    }
+  }
+
+  private async _bootstrapDir(dir: string, label: string, forceOverwrite: boolean): Promise<EnvStatus> {
     const envPath        = path.join(dir, '.env');
     const envExamplePath = path.join(dir, '.env.example');
 
     const envExists        = await this._exists(envPath);
     const envExampleExists = await this._exists(envExamplePath);
 
-    if (envExists) {
+    if (envExists && !forceOverwrite) {
       this.streamer.system(
         `.env already exists in [${label}] — skipping environment generation`,
         'repostart'
@@ -53,6 +79,21 @@ export class EnvBootstrap {
       const ev = this.timeline.addEvent(`✓ .env present [${label}]`, 'success');
       this.timeline.updateEvent(ev.id, 'success', `.env detected in ${label}`);
       return 'configured';
+    }
+
+    if (envExists && forceOverwrite) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupPath = `${envPath}.backup-${timestamp}`;
+      try {
+        await fs.promises.copyFile(envPath, backupPath);
+        this.streamer.system(`Backed up existing .env to ${path.basename(backupPath)} in [${label}]`, 'repostart');
+        const ev = this.timeline.addEvent(`Backed up .env [${label}]`, 'success');
+        this.timeline.updateEvent(ev.id, 'success', `Backup created: ${path.basename(backupPath)}`);
+      } catch (err) {
+        this.streamer.system(`✗ Failed to backup .env in [${label}]: ${(err as Error).message}. Aborting overwrite.`, 'repostart');
+        this.timeline.addEvent(`Backup failed, aborting overwrite [${label}]`, 'error');
+        return 'configured';
+      }
     }
 
     if (envExampleExists) {
