@@ -24,10 +24,10 @@ interface ErrorGuidance {
 }
 
 const ERROR_PATTERNS: ErrorGuidance[] = [
-  { pattern: /EADDRINUSE|address already in use|port.*in use/i, message: '⚠ Port may already be in use. Try stopping other processes or change the port.' },
-  { pattern: /cannot find module|module not found/i,             message: '⚠ Missing module detected. Try running npm install again.' },
-  { pattern: /npm error|yarn error|pnpm error/i,                message: '⚠ Dependency installation failure detected. Check the Logs tab.' },
-  { pattern: /ENOENT.*\.env/i,                                  message: '⚠ Environment file missing. Check your .env configuration.' },
+  { pattern: /EADDRINUSE|address already in use|port.*in use/i, message: 'Port may already be in use. Try stopping other processes or change the port.' },
+  { pattern: /cannot find module|module not found/i,             message: 'Missing module detected. Try running npm install again.' },
+  { pattern: /npm error|yarn error|pnpm error/i,                message: 'Dependency installation failure detected. Check the Logs tab.' },
+  { pattern: /ENOENT.*\.env/i,                                  message: 'Environment file missing. Check your .env configuration.' },
 ];
 
 function detectErrorGuidance(line: string): string | null {
@@ -44,13 +44,20 @@ export interface StartupRunnerOptions {
   onServiceStatus?: (status: ServiceStatus) => void;
 }
 
+interface ManagedTerminal {
+  terminal: vscode.Terminal;
+  role: string;
+  relativePath: string;
+}
+
 export class StartupRunner {
   private apps: AppFolder[];
   private timeline: ActivityTimeline;
   private streamer: StartupRunnerOptions['streamer'];
   private onServiceStatus?: (status: ServiceStatus) => void;
 
-  private terminals: vscode.Terminal[] = [];
+  private managedTerminals: ManagedTerminal[] = [];
+  private closeDisposable?: vscode.Disposable;
 
   constructor(opts: StartupRunnerOptions) {
     this.apps             = opts.apps;
@@ -60,17 +67,24 @@ export class StartupRunner {
   }
 
   async start(): Promise<void> {
+    // Register terminal close listener (only once)
+    if (!this.closeDisposable) {
+      this.closeDisposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+        this._handleTerminalClose(closedTerminal);
+      });
+    }
+
     const appsWithScript = this.apps.filter((a) => a.startScript !== null || a.startCommand !== undefined);
 
     if (appsWithScript.length === 0) {
-      this.streamer.system('No startup scripts detected — skipping service launch.');
+      this.streamer.system('No startup scripts detected - skipping service launch.');
       const event = this.timeline.addEvent(TimelineStep.STARTING_SERVICES, 'skipped');
       this.timeline.updateEvent(event.id, 'skipped', 'No start scripts found');
       return;
     }
 
     const parentEvent = this.timeline.addEvent(TimelineStep.STARTING_SERVICES, 'running');
-    this.streamer.system('Launching services in VS Code terminals…');
+    this.streamer.system('Launching services in VS Code terminals...');
 
     const frontendApp = appsWithScript.find((a) => a.isFrontend);
     const backendApp  = appsWithScript.find((a) => a.isBackend);
@@ -101,7 +115,7 @@ export class StartupRunner {
     );
 
     this.streamer.system(
-      `✓ ${appsWithScript.length} service(s) started in VS Code terminals` +
+      `${appsWithScript.length} service(s) started in VS Code terminals` +
       (frontendApp && backendApp ? ' (split terminal requested)' : '')
     );
   }
@@ -112,7 +126,7 @@ export class StartupRunner {
   ): vscode.Terminal {
     const cmd = app.startScript !== null
       ? runCommand(app.packageManager, app.startScript)
-      : app.startCommand!;  // guaranteed non-null — caller filters on startScript||startCommand
+      : app.startCommand!;
     const name    = terminalLabel(app);
     const source  = `${app.startScript ?? app.startCommand} [${app.relativePath}]`;
 
@@ -129,12 +143,18 @@ export class StartupRunner {
     };
 
     const terminal = vscode.window.createTerminal(terminalOptions);
-    terminal.show(false); // false = don't steal focus
+    terminal.show(false);
     terminal.sendText(cmd);
 
-    this.terminals.push(terminal);
-
     const role = app.isFrontend ? 'Frontend' : app.isBackend ? 'Backend' : app.label;
+
+    // Track this terminal as managed
+    this.managedTerminals.push({
+      terminal,
+      role,
+      relativePath: app.relativePath,
+    });
+
     this.onServiceStatus?.({
       label: role,
       relativePath: app.relativePath,
@@ -147,7 +167,7 @@ export class StartupRunner {
       id: uid(),
       level: 'success',
       source,
-      message: `▶ ${cmd} — terminal: ${name}`,
+      message: `${cmd} - terminal: ${name}`,
       timestamp: now(),
       category: app.isFrontend ? 'FRONTEND' : app.isBackend ? 'BACKEND' : 'SYSTEM',
     };
@@ -156,10 +176,77 @@ export class StartupRunner {
     return terminal;
   }
 
-  killAll(): void {
-    for (const t of this.terminals) {
-      try { t.dispose(); } catch { /* already disposed */ }
+  /**
+   * Handle terminal close events from VS Code.
+   * If the closed terminal is one we manage, update the service status to 'stopped',
+   * record a timeline event, and emit a log entry.
+   */
+  private _handleTerminalClose(closedTerminal: vscode.Terminal): void {
+    const idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
+    if (idx === -1) {
+      // Not a RepoStart-managed terminal - ignore
+      return;
     }
-    this.terminals = [];
+
+    const managed = this.managedTerminals[idx];
+
+    // Remove from tracked terminals
+    this.managedTerminals.splice(idx, 1);
+
+    // Update service status to 'stopped'
+    this.onServiceStatus?.({
+      label: managed.role,
+      relativePath: managed.relativePath,
+      state: 'stopped',
+    });
+
+    // Record timeline event
+    const stopEvent = this.timeline.addEvent(
+      `${managed.role} service stopped`,
+      'success'
+    );
+    this.timeline.updateEvent(
+      stopEvent.id,
+      'success',
+      `Terminal closed by user`
+    );
+
+    // Emit log entry
+    const logEntry: LogEntry = {
+      id: uid(),
+      level: 'system',
+      source: `${managed.role} [${managed.relativePath}]`,
+      message: `${managed.role} service stopped`,
+      timestamp: now(),
+      category: managed.role === 'Frontend' ? 'FRONTEND' : managed.role === 'Backend' ? 'BACKEND' : 'SYSTEM',
+    };
+    this.streamer.emit('log', logEntry);
+
+    this.streamer.system(
+      `${managed.role} service stopped (terminal closed)`,
+      `${managed.role} [${managed.relativePath}]`
+    );
+  }
+
+  killAll(): void {
+    for (const mt of this.managedTerminals) {
+      try {
+        mt.terminal.dispose();
+        // Fire stopped status for each
+        this.onServiceStatus?.({
+          label: mt.role,
+          relativePath: mt.relativePath,
+          state: 'stopped',
+        });
+      } catch { /* already disposed */ }
+    }
+    this.managedTerminals = [];
+    this.closeDisposable?.dispose();
+    this.closeDisposable = undefined;
+  }
+
+  dispose(): void {
+    this.closeDisposable?.dispose();
+    this.closeDisposable = undefined;
   }
 }
