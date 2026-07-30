@@ -93,7 +93,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._settingsManager.save(message.payload).then(() => {
               this._sendSettings();
               if (this._getSettings().showNotifications) {
-                vscode.window.showInformationMessage('RepoStart: Settings saved ✓');
+                vscode.window.showInformationMessage('RepoStart: Settings saved');
               }
             });
             break;
@@ -120,7 +120,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-
   focus(): void {
     this._view?.show(true);
   }
@@ -139,6 +138,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this._startupRunner?.killAll();
+    this._startupRunner?.dispose();
+    this._startupRunner = undefined;
   }
 
   private async _triggerAnalysis(): Promise<void> {
@@ -156,7 +157,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this._postMessage({ type: 'analysisResult', payload: analysis });
     } catch (err) {
       vscode.window.showErrorMessage(
-        `RepoStart: Analysis failed — ${(err as Error).message}`
+        `RepoStart: Analysis failed - ${(err as Error).message}`
       );
     }
   }
@@ -168,7 +169,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _sendSettings(): void {
     this._postMessage({ type: 'settingsLoaded', payload: this._getSettings() });
   }
-
 
   private async _runSetup(): Promise<void> {
     if (this._setupRunning) {
@@ -198,7 +198,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     timeline.on('update', (event: TimelineEvent) => {
       this._postMessage({ type: 'timelineUpdate', payload: event });
-      // Accumulate: upsert by id so updates overwrite the original add
       const idx = this._timelineEvents.findIndex((e) => e.id === event.id);
       if (idx >= 0) { this._timelineEvents[idx] = event; }
       else { this._timelineEvents.push(event); }
@@ -210,8 +209,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     try {
-      const detectEvent = timeline.addEvent('✓ Repository detected', 'running');
-      streamer.system('RepoStart starting setup…');
+      const detectEvent = timeline.addEvent('Repository detected', 'running');
+      streamer.system('RepoStart starting setup...');
 
       let analysis = this._analysis;
       if (!analysis) {
@@ -221,26 +220,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       timeline.updateEvent(detectEvent.id, 'success', `Root: ${rootPath}`);
 
-      const archEvent = timeline.addEvent('✓ Architecture analyzed', 'running');
+      const archEvent = timeline.addEvent('Architecture analyzed', 'running');
 
       const fe = analysis.apps.find((a) => a.isFrontend);
       const be = analysis.apps.find((a) => a.isBackend);
       if (fe) {
-        const fev = timeline.addEvent(`✓ Frontend detected (${fe.relativePath})`, 'success');
+        const fev = timeline.addEvent(`Frontend detected (${fe.relativePath})`, 'success');
         timeline.updateEvent(fev.id, 'success', fe.framework);
       }
       if (be) {
-        const bev = timeline.addEvent(`✓ Backend detected (${be.relativePath})`, 'success');
+        const bev = timeline.addEvent(`Backend detected (${be.relativePath})`, 'success');
         timeline.updateEvent(bev.id, 'success', be.framework);
       }
 
-      const pmEv = timeline.addEvent('✓ Package manager detected', 'success');
+      const pmEv = timeline.addEvent('Package manager detected', 'success');
       timeline.updateEvent(pmEv.id, 'success', analysis.packageManager);
 
       const hasApps = analysis.apps && analysis.apps.length > 0;
       const hasPython = analysis.pythonProjects && analysis.pythonProjects.length > 0;
-      streamer.system(`Architecture: ${analysis.architecture} · ${analysis.apps.length} Node app(s) · ${analysis.pythonProjects?.length || 0} Python project(s)`);
-      
+      streamer.system(`Architecture: ${analysis.architecture} | ${analysis.apps.length} Node app(s) | ${analysis.pythonProjects?.length || 0} Python project(s)`);
+
       const appPaths = [
         ...analysis.apps.map((a) => a.relativePath),
         ...(analysis.pythonProjects || []).map((p) => p.relativePath),
@@ -249,7 +248,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       timeline.updateEvent(
         archEvent.id,
         'success',
-        `${analysis.architecture} — ${appPaths}`
+        `${analysis.architecture} - ${appPaths}`
       );
 
       if (!hasApps && !hasPython) {
@@ -313,18 +312,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await this._launchApps(analysis.apps, timeline, streamer, settings);
         this._summary.appsStarted = true;
       } else {
-        const skipEv = timeline.addEvent('Auto Run disabled — skipping service launch', 'skipped');
+        const skipEv = timeline.addEvent('Auto Run disabled - skipping service launch', 'skipped');
         timeline.updateEvent(skipEv.id, 'skipped');
       }
 
       const completeEvent = timeline.addEvent(TimelineStep.COMPLETE, 'success');
-      timeline.updateEvent(completeEvent.id, 'success', '✓ Applications running');
-      streamer.system('✓ RepoStart setup complete!');
+      timeline.updateEvent(completeEvent.id, 'success', 'Applications running');
+      streamer.system('RepoStart setup complete!');
 
       this._postMessage({ type: 'setupSummaryUpdate', payload: this._summary });
       this._postMessage({
         type: 'setupComplete',
-        payload: { success: true, message: 'Setup complete — services running' },
+        payload: { success: true, message: 'Setup complete - services running' },
       });
 
       if (settings.showNotifications) {
@@ -332,11 +331,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       const message = (err as Error).message;
-      streamer.system(`✗ Setup failed: ${message}`);
+      streamer.system(`Setup failed: ${message}`);
       this._summary.errorCount++;
       this._postMessage({ type: 'setupSummaryUpdate', payload: this._summary });
       this._postMessage({ type: 'setupComplete', payload: { success: false, message } });
-      vscode.window.showErrorMessage(`RepoStart: Setup failed — ${message}`);
+      vscode.window.showErrorMessage(`RepoStart: Setup failed - ${message}`);
     } finally {
       this._setupRunning = false;
     }
@@ -378,7 +377,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this._postMessage({ type: 'clearLogs' });
-    streamer.system('RepoStart: Run Project — launching applications…');
+    streamer.system('RepoStart: Run Project - launching applications...');
 
     try {
       await this._launchApps(analysis.apps, timeline, streamer, settings);
@@ -404,6 +403,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return true;
     });
 
+    // Dispose the previous runner (kills old terminals + removes old close listener)
+    this._startupRunner?.killAll();
+    this._startupRunner?.dispose();
+
     const runner = new StartupRunner({
       apps: filtered,
       timeline,
@@ -421,7 +424,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
     });
 
-    this._startupRunner?.killAll();
     this._startupRunner = runner;
 
     await runner.start();
@@ -443,25 +445,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const errorEntries = this._logs.filter((e) => e.level === 'error');
 
     const lines: string[] = [
-      '══════════════════════════════════════════',
+      '==========================================',
       '  RepoStart Setup Report',
-      '══════════════════════════════════════════',
+      '==========================================',
       '',
       `Repository:       ${repoName}`,
       `Timestamp:        ${timestamp}`,
       `Root Path:        ${analysis.rootPath}`,
       '',
-      '── Architecture ───────────────────────────',
+      '-- Architecture ---------------------------',
       `Architecture:     ${analysis.architecture}`,
       `Frontend:         ${fe ? `${fe.framework} (${fe.relativePath})` : 'None'}`,
       `Backend:          ${be ? `${be.framework} (${be.relativePath})` : 'None'}`,
       `Package Manager:  ${analysis.packageManager}`,
       '',
-      '── Environment ────────────────────────────',
-      `Environment:      ${analysis.envStatus === 'configured' ? '✓ Configured' : 'Not Required'}`,
+      '-- Environment ----------------------------',
+      `Environment:      ${analysis.envStatus === 'configured' ? 'Configured' : 'Not Required'}`,
       '',
       ...(analysis.pythonProjects && analysis.pythonProjects.length > 0 ? [
-        '── Python Environments ────────────────────',
+        '-- Python Environments --------------------',
         ...analysis.pythonProjects.flatMap((p) => {
           const venvName = p.venvName || '.venv';
           const rootSuffix = p.relativePath === '.' ? '' : ` (${p.relativePath})`;
@@ -489,36 +491,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }),
         ''
       ] : []),
-      '── Setup Results ──────────────────────────',
-      `Dependencies:     ${this._summary.depsInstalled ? '✓ Installed' : '✗ Failed'}`,
-      `Environment:      ${this._summary.envGenerated  ? '✓ Generated' : 'Not Required'}`,
-      `Applications:     ${this._summary.appsStarted   ? '✓ Started'  : 'Not Started'}`,
+      '-- Setup Results --------------------------',
+      `Dependencies:     ${this._summary.depsInstalled ? 'Installed' : 'Failed'}`,
+      `Environment:      ${this._summary.envGenerated  ? 'Generated' : 'Not Required'}`,
+      `Applications:     ${this._summary.appsStarted   ? 'Started'  : 'Not Started'}`,
       `Errors:           ${this._summary.errorCount}`,
       '',
-      '── Service Status ─────────────────────────',
+      '-- Service Status -------------------------',
       ...this._serviceStatuses.map(
-        (s) => `${s.label.padEnd(16)}  ${s.state === 'running' ? '🟢 Running' : '🔴 Stopped'}`
+        (s) => `${s.label.padEnd(16)}  ${s.state === 'running' ? 'Running' : 'Stopped'}`
       ),
       '',
-      '── Apps Detected ──────────────────────────',
+      '-- Apps Detected --------------------------',
       ...analysis.apps.map(
         (a) =>
           `${a.relativePath.padEnd(20)}  ${a.framework}  ${a.isFrontend ? '[frontend]' : a.isBackend ? '[backend]' : '[app]'}  start: ${a.startScript ?? (a.startCommand ? `(${a.startCommand})` : 'none')}`
       ),
       '',
-      '── Error Summary ──────────────────────────',
+      '-- Error Summary --------------------------',
       ...(errorEntries.length === 0
         ? ['  No errors recorded.']
         : errorEntries.map((e) => {
             const time = new Date(e.timestamp).toLocaleTimeString('en-US', {
               hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
             });
-            return `✗ ${time}  [${e.source}]  ${e.message}`;
+            return `[!] ${time}  [${e.source}]  ${e.message}`;
           })),
       '',
-      '══════════════════════════════════════════',
+      '==========================================',
       '  Generated by RepoStart',
-      '══════════════════════════════════════════',
+      '==========================================',
     ];
 
     const content = lines.join('\n');
@@ -553,24 +555,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const statusIcon = (status: import('../types').TimelineEventStatus): string => {
       switch (status) {
-        case 'success': return '✓';
-        case 'error':   return '✗';
-        case 'running': return '▶';
-        case 'skipped': return '○';
-        default:        return '·';
+        case 'success': return '[v]';
+        case 'error':   return '[x]';
+        case 'running': return '[>]';
+        case 'skipped': return '[o]';
+        default:        return '[.]';
       }
     };
 
     const lines: string[] = [
-      '══════════════════════════════════════════',
+      '==========================================',
       '  RepoStart Timeline Report',
-      '══════════════════════════════════════════',
+      '==========================================',
       '',
       `Repository:  ${repoName}`,
       `Exported:    ${timestamp}`,
       `Events:      ${this._timelineEvents.length}`,
       '',
-      '── Timeline ───────────────────────────────',
+      '-- Timeline -------------------------------',
       '',
       ...this._timelineEvents.map((e) => {
         const icon = statusIcon(e.status);
@@ -581,9 +583,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return `${icon}  ${time}  ${e.label}${detail}`;
       }),
       '',
-      '══════════════════════════════════════════',
+      '==========================================',
       '  Generated by RepoStart',
-      '══════════════════════════════════════════',
+      '==========================================',
     ];
 
     const content = lines.join('\n');
@@ -615,15 +617,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const timestamp = new Date().toISOString();
 
     const lines: string[] = [
-      '══════════════════════════════════════════',
+      '==========================================',
       '  RepoStart Log Export',
-      '══════════════════════════════════════════',
+      '==========================================',
       '',
       `Repository:  ${repoName}`,
       `Exported:    ${timestamp}`,
       `Entries:     ${this._logs.length}`,
       '',
-      '── Logs ───────────────────────────────────',
+      '-- Logs -----------------------------------',
       '',
       ...this._logs.map((e) => {
         const cat = e.category
@@ -643,9 +645,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return `[${cat}] ${time}  ${e.message}`;
       }),
       '',
-      '══════════════════════════════════════════',
+      '==========================================',
       '  Generated by RepoStart',
-      '══════════════════════════════════════════',
+      '==========================================',
     ];
 
     const content = lines.join('\n');
