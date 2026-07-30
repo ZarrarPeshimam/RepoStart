@@ -4,7 +4,7 @@ import { SidebarProvider } from './ui/SidebarProvider';
 let sidebarProvider: SidebarProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-  console.log('[RepoStart] Extension activating…');
+  console.log('[RepoStart] Extension activating...');
 
   sidebarProvider = new SidebarProvider(context.extensionUri, context);
 
@@ -48,11 +48,11 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  console.log('[RepoStart] Extension activated ✓');
+  console.log('[RepoStart] Extension activated');
 }
 
 export function deactivate(): void {
-  console.log('[RepoStart] Extension deactivating…');
+  console.log('[RepoStart] Extension deactivating...');
   sidebarProvider?.dispose();
   sidebarProvider = undefined;
 }
