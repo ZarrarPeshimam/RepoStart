@@ -31,6 +31,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _setupRunning = false;
   private _settingsManager: SettingsManager;
 
+  // Issue #26: persistent terminal-close listener.
+  // Registered ONCE on the SidebarProvider (not on the StartupRunner)
+  // so it survives across re-runs. The callback delegates to the
+  // active StartupRunner's handleTerminalClose method.
+  private _terminalCloseDisposable?: vscode.Disposable;
+
+  // Issue #26: keep references to the current timeline/streamer so
+  // _handleTerminalClose can emit events through them even after
+  // _runSetup() or _runProject() has returned.
+  private _currentTimeline?: ActivityTimeline;
+  private _currentStreamer?: LogStreamer;
+
   private _summary: SetupSummary = {
     depsInstalled: false,
     envGenerated: false,
@@ -49,6 +61,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly _context: vscode.ExtensionContext
   ) {
     this._settingsManager = new SettingsManager(_context);
+
+    // Issue #26: register the terminal-close listener ONCE here, on the
+    // SidebarProvider. This listener persists for the entire extension
+    // lifetime — it is NOT tied to any single StartupRunner instance.
+    // When a terminal is closed, we delegate to the active runner.
+    this._terminalCloseDisposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+      this._onTerminalClosed(closedTerminal);
+    });
   }
 
   resolveWebviewView(
@@ -140,6 +160,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this._startupRunner?.killAll();
     this._startupRunner?.dispose();
     this._startupRunner = undefined;
+    // Issue #26: dispose the persistent terminal-close listener
+    this._terminalCloseDisposable?.dispose();
+    this._terminalCloseDisposable = undefined;
+  }
+
+  /**
+   * Issue #26: Called when ANY terminal in VS Code is closed.
+   * Delegates to the active StartupRunner if the terminal is managed.
+   */
+  private _onTerminalClosed(closedTerminal: vscode.Terminal): void {
+    if (!this._startupRunner) {
+      return;
+    }
+    if (!this._startupRunner.isManagedTerminal(closedTerminal)) {
+      return;
+    }
+    // Delegate to the runner — it will fire onServiceStatus, add
+    // timeline events, and emit log entries through the timeline
+    // and streamer that are still referenced by the SidebarProvider.
+    this._startupRunner.handleTerminalClose(closedTerminal);
   }
 
   private async _triggerAnalysis(): Promise<void> {
@@ -195,6 +235,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const timeline = new ActivityTimeline();
     const streamer = new LogStreamer();
+
+    // Issue #26: store references on the SidebarProvider so the
+    // terminal-close handler can emit events through them.
+    this._currentTimeline = timeline;
+    this._currentStreamer = streamer;
 
     timeline.on('update', (event: TimelineEvent) => {
       this._postMessage({ type: 'timelineUpdate', payload: event });
@@ -362,6 +407,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const settings = this._getSettings();
     const timeline = new ActivityTimeline();
     const streamer = new LogStreamer();
+
+    // Issue #26: store references on the SidebarProvider
+    this._currentTimeline = timeline;
+    this._currentStreamer = streamer;
+
     this._timelineEvents = [];
     this._logs = [];
 
@@ -403,7 +453,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return true;
     });
 
-    // Dispose the previous runner (kills old terminals + removes old close listener)
+    // Kill old terminals (but don't dispose the terminal-close listener —
+    // it's managed by the SidebarProvider now, issue #26)
     this._startupRunner?.killAll();
     this._startupRunner?.dispose();
 
