@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { AppFolder, LogEntry, LogLevel, PackageManager, ServiceStatus, ServiceState } from '../types';
 import { ActivityTimeline, TimelineStep } from '../services/ActivityTimeline';
+import { LogStreamer } from '../services/LogStreamer';
 import { now, uid } from '../utils/fs';
 
 function runCommand(pm: PackageManager, script: string): string {
@@ -40,8 +41,9 @@ function detectErrorGuidance(line: string): string | null {
 export interface StartupRunnerOptions {
   apps: AppFolder[];
   timeline: ActivityTimeline;
-  streamer: EventEmitter & { system: (msg: string, src?: string) => void };
+  streamer: LogStreamer;
   onServiceStatus?: (status: ServiceStatus) => void;
+  onTerminalClosed?: (terminal: vscode.Terminal, role: string, relativePath: string) => void;
 }
 
 interface ManagedTerminal {
@@ -53,26 +55,25 @@ interface ManagedTerminal {
 export class StartupRunner {
   private apps: AppFolder[];
   private timeline: ActivityTimeline;
-  private streamer: StartupRunnerOptions['streamer'];
+  private streamer: LogStreamer;
   private onServiceStatus?: (status: ServiceStatus) => void;
+  private onTerminalClosed?: (terminal: vscode.Terminal, role: string, relativePath: string) => void;
 
   private managedTerminals: ManagedTerminal[] = [];
-  private closeDisposable?: vscode.Disposable;
 
   constructor(opts: StartupRunnerOptions) {
     this.apps             = opts.apps;
     this.timeline         = opts.timeline;
     this.streamer         = opts.streamer;
     this.onServiceStatus  = opts.onServiceStatus;
+    this.onTerminalClosed = opts.onTerminalClosed;
   }
 
   async start(): Promise<void> {
-    // Register terminal close listener (only once)
-    if (!this.closeDisposable) {
-      this.closeDisposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
-        this._handleTerminalClose(closedTerminal);
-      });
-    }
+    // NOTE: The onDidCloseTerminal listener is NOT registered here.
+    // It is registered at the SidebarProvider level so it persists
+    // across re-runs (issue #26). The SidebarProvider calls
+    // handleTerminalClose on the active StartupRunner.
 
     const appsWithScript = this.apps.filter((a) => a.startScript !== null || a.startCommand !== undefined);
 
@@ -177,20 +178,25 @@ export class StartupRunner {
   }
 
   /**
-   * Handle terminal close events from VS Code.
-   * If the closed terminal is one we manage, update the service status to 'stopped',
-   * record a timeline event, and emit a log entry.
+   * Check if a terminal is managed by this runner.
+   * Called by SidebarProvider's onDidCloseTerminal listener (issue #26).
    */
-  private _handleTerminalClose(closedTerminal: vscode.Terminal): void {
+  isManagedTerminal(terminal: vscode.Terminal): boolean {
+    return this.managedTerminals.some((mt) => mt.terminal === terminal);
+  }
+
+  /**
+   * Handle terminal close — called by SidebarProvider when a terminal
+   * is closed. Updates service status, records timeline event, and
+   * emits a log entry.
+   */
+  handleTerminalClose(closedTerminal: vscode.Terminal): void {
     const idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
     if (idx === -1) {
-      // Not a RepoStart-managed terminal - ignore
       return;
     }
 
     const managed = this.managedTerminals[idx];
-
-    // Remove from tracked terminals
     this.managedTerminals.splice(idx, 1);
 
     // Update service status to 'stopped'
@@ -232,7 +238,6 @@ export class StartupRunner {
     for (const mt of this.managedTerminals) {
       try {
         mt.terminal.dispose();
-        // Fire stopped status for each
         this.onServiceStatus?.({
           label: mt.role,
           relativePath: mt.relativePath,
@@ -241,12 +246,9 @@ export class StartupRunner {
       } catch { /* already disposed */ }
     }
     this.managedTerminals = [];
-    this.closeDisposable?.dispose();
-    this.closeDisposable = undefined;
   }
 
   dispose(): void {
-    this.closeDisposable?.dispose();
-    this.closeDisposable = undefined;
+    // No closeDisposable to dispose — it's managed by SidebarProvider now.
   }
 }
