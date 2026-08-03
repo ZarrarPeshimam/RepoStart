@@ -208,15 +208,31 @@ function capitalize(s: string): string {
 }
 
 const PYTHON_INDICATORS = ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile', 'poetry.lock'];
+// Fallback: used only when none of the PYTHON_INDICATORS above are present.
+const PYTHON_ENTRY_POINTS = ['main.py', 'app.py', 'run.py', 'server.py', 'manage.py'];
 const VENV_NAMES = ['.venv', 'venv', 'env'];
 
-async function isPythonProjectDir(dir: string): Promise<boolean> {
+interface PythonDetectionResult {
+  detected: boolean;
+  method?: 'dependency-file' | 'fallback';
+  matchedFile?: string;
+}
+
+async function detectPythonProjectDir(dir: string): Promise<PythonDetectionResult> {
   for (const indicator of PYTHON_INDICATORS) {
     if (await fileExistsIn(dir, indicator)) {
-      return true;
+      return { detected: true, method: 'dependency-file', matchedFile: indicator };
     }
   }
-  return false;
+
+  // No stronger indicator found — fall back to common entry-point files.
+  for (const entryFile of PYTHON_ENTRY_POINTS) {
+    if (await fileExistsIn(dir, entryFile)) {
+      return { detected: true, method: 'fallback', matchedFile: entryFile };
+    }
+  }
+
+  return { detected: false };
 }
 
 async function detectVenv(projectDir: string): Promise<{ name: string; isValid: boolean } | null> {
@@ -235,10 +251,13 @@ async function detectVenv(projectDir: string): Promise<{ name: string; isValid: 
 export async function detectPythonProjects(rootPath: string): Promise<PythonProject[]> {
   const projects: PythonProject[] = [];
 
-  if (await isPythonProjectDir(rootPath)) {
+  const rootResult = await detectPythonProjectDir(rootPath);
+  if (rootResult.detected) {
     projects.push({
       path: rootPath,
       relativePath: '.',
+      detectionMethod: rootResult.method,
+      matchedFile: rootResult.matchedFile,
     });
   }
 
@@ -253,19 +272,25 @@ export async function detectPythonProjects(rootPath: string): Promise<PythonProj
         for (const subEntry of subEntries) {
           if (subEntry.isDirectory()) {
             const innerPath = path.join(subPath, subEntry.name);
-            if (await isPythonProjectDir(innerPath)) {
+            const innerResult = await detectPythonProjectDir(innerPath);
+            if (innerResult.detected) {
               projects.push({
                 path: innerPath,
                 relativePath: `${entry.name}/${subEntry.name}`,
+                detectionMethod: innerResult.method,
+                matchedFile: innerResult.matchedFile,
               });
             }
           }
         }
       } else {
-        if (await isPythonProjectDir(subPath)) {
+        const subResult = await detectPythonProjectDir(subPath);
+        if (subResult.detected) {
           projects.push({
             path: subPath,
             relativePath: entry.name,
+            detectionMethod: subResult.method,
+            matchedFile: subResult.matchedFile,
           });
         }
       }
