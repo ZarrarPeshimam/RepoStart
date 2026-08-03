@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import * as path from 'path';
 import {
   AppFolder,
@@ -9,6 +10,9 @@ import {
   PythonProject,
 } from '../types';
 import { fileExistsIn, listDir, pathExists, readJsonFile } from '../utils/fs';
+import { extractEnvVarsFromDocs, ExtractedEnvVar } from './DocEnvParser';
+
+export { extractEnvVarsFromDocs, ExtractedEnvVar };
 
 const CLIENT_DIRS = ['client', 'frontend', 'web', 'ui', 'app'];
 
@@ -317,6 +321,7 @@ export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis>
     apps.length <= 1 ? 'single' : probe.type;
 
   const pythonProjects = await detectPythonProjects(rootPath);
+  const docEnvVars = await extractEnvVarsFromDocs(rootPath);
 
   const partial: Omit<RepoAnalysis, 'summary'> = {
     rootPath,
@@ -326,6 +331,7 @@ export async function analyzeRepository(rootPath: string): Promise<RepoAnalysis>
     hasRootPackageJson,
     envStatus: 'pending',
     pythonProjects,
+    ...(docEnvVars.length > 0 ? { docEnvVars } : {}),
   };
 
   return {
