@@ -152,6 +152,15 @@ server/
 → Generate .env
 ```
 
+
+### Configure Environment Variables
+
+Create a `.env` file in the root directory (you can copy the structure from `.env.example`):
+```bash
+cp .env.example .env
+```
+Open the `.env` file and insert your credentials.
+
 ---
 
 ## One-Click Setup Workflow
