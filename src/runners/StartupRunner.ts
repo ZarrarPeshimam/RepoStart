@@ -53,7 +53,7 @@ interface ManagedTerminal {
   relativePath: string;
   /** Process ID if available (VS Code 1.93+). Used as a fallback identifier. */
   processId?: number;
-  /** Human-readable name used to match terminals by name as a last resort. */
+  /** Human-readable name used for diagnostics only (NOT for matching). */
   name: string;
 }
 
@@ -66,6 +66,17 @@ export class StartupRunner {
   private logger?: vscode.OutputChannel;
 
   private managedTerminals: ManagedTerminal[] = [];
+
+  /**
+   * Issue #26 fix: Track terminals that were explicitly killed by killAll().
+   * When onDidCloseTerminal fires for these, we ignore them — they were
+   * killed by us, not by the user, so they should NOT trigger a
+   * "service stopped" status update.
+   *
+   * This prevents the "toggle" bug where restarting services causes the
+   * old terminal's close event to mark the new terminal as stopped.
+   */
+  private _killedTerminals = new Set<vscode.Terminal>();
 
   constructor(opts: StartupRunnerOptions) {
     this.apps             = opts.apps;
@@ -161,8 +172,8 @@ export class StartupRunner {
 
     const role = app.isFrontend ? 'Frontend' : app.isBackend ? 'Backend' : app.label;
 
-    // Track this terminal as managed — store both the Terminal reference
-    // AND the name so we can match by name as a fallback (issue #26).
+    // Track this terminal as managed — reference equality is used for
+    // matching (NOT name match, which caused the toggle bug in issue #26).
     const managed: ManagedTerminal = {
       terminal,
       role,
@@ -171,8 +182,6 @@ export class StartupRunner {
     };
 
     // Try to get the process ID asynchronously (available in VS Code 1.93+).
-    // This is used as a secondary identifier if the Terminal object
-    // comparison fails.
     try {
       const pidPromise = terminal.processId as PromiseLike<number | undefined>;
       if (pidPromise && typeof pidPromise.then === 'function') {
@@ -186,7 +195,7 @@ export class StartupRunner {
         });
       }
     } catch {
-      // Ignore — processId is optional and only used as a fallback identifier.
+      // Ignore — processId is optional and only used for diagnostics.
     }
 
     this.managedTerminals.push(managed);
@@ -215,34 +224,27 @@ export class StartupRunner {
   /**
    * Check if a terminal is managed by this runner.
    *
-   * Uses three strategies in order:
-   * 1. Reference equality (mt.terminal === terminal) — fastest, works
-   *    in most cases.
-   * 2. Process ID match — fallback if the Terminal object is a different
-   *    wrapper around the same underlying process.
-   * 3. Name match — last resort, matches by the terminal's display name.
+   * Uses REFERENCE EQUALITY ONLY (mt.terminal === terminal).
+   *
+   * We do NOT match by name — matching by name caused a toggle bug where
+   * restarting services would make the old terminal's close event
+   * incorrectly match the new terminal (which has the same name) and
+   * mark it as stopped.
    *
    * Called by SidebarProvider's onDidCloseTerminal listener (issue #26).
    */
   isManagedTerminal(terminal: vscode.Terminal): boolean {
-    // Strategy 1: reference equality
+    // If this terminal was explicitly killed by killAll(), ignore it.
+    // This is the key fix for the toggle bug.
+    if (this._killedTerminals.has(terminal)) {
+      this.log(`isManagedTerminal: terminal "${terminal.name}" was killed by killAll() — ignoring close event`);
+      return false;
+    }
+
+    // Reference equality only.
     const byRef = this.managedTerminals.some((mt) => mt.terminal === terminal);
     if (byRef) {
       this.log(`isManagedTerminal: matched by reference for "${terminal.name}"`);
-      return true;
-    }
-
-    // Strategy 2: process ID
-    // (Synchronous check — processId may have been resolved already)
-    // Note: we can't await terminal.processId here because this method
-    // is synchronous. But if we previously stored the PID, we can
-    // compare. We can't get the closed terminal's PID after it's closed,
-    // so this strategy is limited. Skip for now.
-
-    // Strategy 3: name match
-    const byName = this.managedTerminals.some((mt) => mt.name === terminal.name);
-    if (byName) {
-      this.log(`isManagedTerminal: matched by name "${terminal.name}" (reference match failed)`);
       return true;
     }
 
@@ -258,16 +260,15 @@ export class StartupRunner {
    * Returns true if the terminal was managed and handled, false otherwise.
    */
   handleTerminalClose(closedTerminal: vscode.Terminal): boolean {
-    // Find the managed terminal entry — try reference first, then name.
-    let idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
-
-    if (idx === -1) {
-      // Fallback: match by name
-      idx = this.managedTerminals.findIndex((mt) => mt.name === closedTerminal.name);
-      if (idx !== -1) {
-        this.log(`handleTerminalClose: matched by name "${closedTerminal.name}" (reference match failed)`);
-      }
+    // If this terminal was explicitly killed by killAll(), ignore it.
+    if (this._killedTerminals.has(closedTerminal)) {
+      this.log(`handleTerminalClose: terminal "${closedTerminal.name}" was killed by killAll() — ignoring (not a user-initiated close)`);
+      this._killedTerminals.delete(closedTerminal);
+      return false;
     }
+
+    // Reference equality only — do NOT match by name.
+    const idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
 
     if (idx === -1) {
       this.log(`handleTerminalClose: terminal "${closedTerminal.name}" not found in managed list — already removed or not managed`);
@@ -331,11 +332,31 @@ export class StartupRunner {
     }));
   }
 
+  /**
+   * Kill all managed terminals.
+   *
+   * IMPORTANT: We clear `managedTerminals` BEFORE disposing so that
+   * if onDidCloseTerminal fires synchronously during dispose, the
+   * terminal is already gone from the list and won't be matched.
+   *
+   * We also add each terminal to `_killedTerminals` so that when
+   * onDidCloseTerminal fires asynchronously LATER (for the old
+   * terminals), the handler ignores them — they were killed by us,
+   * not by the user, so they should NOT mark the new (replacement)
+   * terminals as stopped.
+   */
   killAll(): void {
-    this.log(`killAll: disposing ${this.managedTerminals.length} managed terminal(s)`);
-    for (const mt of this.managedTerminals) {
+    // Snapshot the list and clear it FIRST.
+    const toKill = this.managedTerminals.splice(0);
+    this.log(`killAll: disposing ${toKill.length} managed terminal(s) (list cleared first)`);
+
+    for (const mt of toKill) {
       try {
+        // Mark this terminal as killed so the async close event is ignored.
+        this._killedTerminals.add(mt.terminal);
+
         mt.terminal.dispose();
+
         this.onServiceStatus?.({
           label: mt.role,
           relativePath: mt.relativePath,
@@ -343,7 +364,13 @@ export class StartupRunner {
         });
       } catch { /* already disposed */ }
     }
-    this.managedTerminals = [];
+
+    // Note: we do NOT clear _killedTerminals here. The terminals stay
+    // in the set until their close events fire and are ignored, at
+    // which point handleTerminalClose removes them individually.
+    // This set is on the OLD runner instance, which gets disposed
+    // after killAll() returns, so memory is reclaimed when the
+    // runner is garbage-collected.
   }
 
   dispose(): void {
