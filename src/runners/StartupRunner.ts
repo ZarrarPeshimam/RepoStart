@@ -56,6 +56,11 @@ interface ManagedTerminal {
   closed: boolean;
 }
 
+/** Grace period (ms) before the exit poller starts checking. */
+const POLLER_GRACE_PERIOD_MS = 3000;
+/** Poller interval (ms). */
+const POLLER_INTERVAL_MS = 2000;
+
 export class StartupRunner {
   private apps: AppFolder[];
   private timeline: ActivityTimeline;
@@ -66,18 +71,8 @@ export class StartupRunner {
 
   private managedTerminals: ManagedTerminal[] = [];
 
-  /**
-   * Polls every managed terminal's `exitStatus` every 1 second.
-   * When a process exits (crash, normal exit, or user Ctrl+C), the
-   * terminal's `exitStatus` becomes defined and we mark the service
-   * as stopped.
-   *
-   * This is necessary because `onDidCloseTerminal` only fires when
-   * the terminal PANEL is closed (trash icon), NOT when the process
-   * inside it exits. VS Code keeps the terminal open after process
-   * exit, showing the last output.
-   */
   private _exitPoller?: NodeJS.Timeout;
+  private _pollerStartedAt = 0;
 
   constructor(opts: StartupRunnerOptions) {
     this.apps             = opts.apps;
@@ -140,6 +135,8 @@ export class StartupRunner {
     }
 
     // Start polling for process exits (crash detection).
+    // A grace period gives processes time to start and the dashboard
+    // time to render the "running" state before we check for crashes.
     this._startExitPolling();
   }
 
@@ -181,6 +178,8 @@ export class StartupRunner {
 
     this.managedTerminals.push(managed);
 
+    this.log(`_launchInTerminal: ${role} [${app.relativePath}] → running (sending to dashboard)`);
+
     this.onServiceStatus?.({
       label: role,
       relativePath: app.relativePath,
@@ -206,10 +205,11 @@ export class StartupRunner {
 
   private _startExitPolling(): void {
     if (this._exitPoller) return;
-    this.log('Starting exit-status poller (1s interval)');
+    this._pollerStartedAt = Date.now();
+    this.log(`Starting exit-status poller (grace: ${POLLER_GRACE_PERIOD_MS}ms, interval: ${POLLER_INTERVAL_MS}ms)`);
     this._exitPoller = setInterval(() => {
       this._checkTerminalExits();
-    }, 1000);
+    }, POLLER_INTERVAL_MS);
   }
 
   private _stopExitPolling(): void {
@@ -220,12 +220,13 @@ export class StartupRunner {
     }
   }
 
-  /**
-   * Check each managed terminal's `exitStatus`.
-   * When a process exits (crash, Ctrl+C, or normal exit), the
-   * `exitStatus` becomes defined. We then mark the service as stopped.
-   */
   private _checkTerminalExits(): void {
+    const elapsed = Date.now() - this._pollerStartedAt;
+    if (elapsed < POLLER_GRACE_PERIOD_MS) {
+      // Still in grace period — don't check yet.
+      return;
+    }
+
     for (const mt of this.managedTerminals) {
       if (mt.closed) continue;
 
@@ -233,7 +234,6 @@ export class StartupRunner {
       try {
         status = mt.terminal.exitStatus;
       } catch {
-        // Terminal object may be in a bad state — skip.
         continue;
       }
 
@@ -244,31 +244,25 @@ export class StartupRunner {
     }
   }
 
-  /**
-   * Called when a managed terminal's process exits (detected via polling).
-   * This handles the case where the process crashes or is killed with
-   * Ctrl+C but the terminal panel stays open.
-   */
   private _handleProcessExit(mt: ManagedTerminal, status: vscode.TerminalExitStatus): void {
     if (mt.closed) return;
     mt.closed = true;
 
     this.log(`_handleProcessExit: ${mt.role} [${mt.relativePath}] exited with code ${status.code}`);
 
-    // Remove from managed list.
     const idx = this.managedTerminals.indexOf(mt);
     if (idx >= 0) {
       this.managedTerminals.splice(idx, 1);
     }
 
-    // Update service status to 'stopped'
+    this.log(`_handleProcessExit: sending ${mt.role} → stopped to dashboard`);
+
     this.onServiceStatus?.({
       label: mt.role,
       relativePath: mt.relativePath,
       state: 'stopped',
     });
 
-    // Record timeline event
     const stopEvent = this.timeline.addEvent(
       `${mt.role} service stopped`,
       'success'
@@ -279,7 +273,6 @@ export class StartupRunner {
       `Process exited (code ${status.code})`
     );
 
-    // Emit log entry
     const logEntry: LogEntry = {
       id: uid(),
       level: status.code === 0 ? 'system' : 'error',
@@ -300,12 +293,6 @@ export class StartupRunner {
 
   // ── Terminal-close handling (manual close via trash icon) ───────
 
-  /**
-   * Check if a terminal is managed by this runner.
-   * Uses REFERENCE EQUALITY ONLY (no name match — name match caused
-   * the toggle bug where restarting services made old close events
-   * match new terminals with the same name).
-   */
   isManagedTerminal(terminal: vscode.Terminal): boolean {
     const byRef = this.managedTerminals.some((mt) => mt.terminal === terminal);
     if (byRef) {
@@ -316,10 +303,6 @@ export class StartupRunner {
     return false;
   }
 
-  /**
-   * Handle terminal close — called by SidebarProvider's
-   * onDidCloseTerminal listener when the user clicks the trash icon.
-   */
   handleTerminalClose(closedTerminal: vscode.Terminal): boolean {
     const idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
 
@@ -380,17 +363,6 @@ export class StartupRunner {
     }));
   }
 
-  /**
-   * Kill all managed terminals.
-   *
-   * CRITICAL ORDER:
-   * 1. Stop the exit poller FIRST (so it doesn't fire during dispose)
-   * 2. Clear managedTerminals (so onDidCloseTerminal finds empty list)
-   * 3. Dispose each terminal
-   *
-   * This prevents the toggle bug where old terminals' close events
-   * mark new (replacement) terminals as stopped.
-   */
   killAll(): void {
     this._stopExitPolling();
 
@@ -398,7 +370,7 @@ export class StartupRunner {
     this.log(`killAll: disposing ${toKill.length} managed terminal(s)`);
 
     for (const mt of toKill) {
-      mt.closed = true; // Prevent any handler from firing for this terminal
+      mt.closed = true;
       try {
         mt.terminal.dispose();
         this.onServiceStatus?.({
