@@ -33,6 +33,8 @@ export interface PythonProject {
   relativePath: string;
   venvName?: string;
   venvStatus?: 'Created' | 'Reused' | 'Validated';
+  detectionMethod?: 'dependency-file' | 'fallback';
+  matchedFile?: string;
 }
 
 export interface RepoAnalysis {

@@ -27,9 +27,12 @@ export class PythonEnvEngine {
     for (const project of this.pythonProjects) {
       this.streamer.system(`Checking Python environment in ${project.relativePath}...`);
 
-      // ✓ Python project detected
-      this.timeline.addEvent('✓ Python project detected', 'success');
-      this.streamer.system('✓ Python project detected');
+      // ✓ Python project detected (reflects fallback vs dependency-file detection)
+      const detectedMsg = project.detectionMethod === 'fallback'
+        ? `✓ Python project detected (fallback via ${project.matchedFile})`
+        : '✓ Python project detected';
+      this.timeline.addEvent(detectedMsg, 'success');
+      this.streamer.system(detectedMsg);
 
       // ✓ Python root identified: backend/
       let relPathWithSlash = project.relativePath;
