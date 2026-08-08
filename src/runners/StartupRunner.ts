@@ -51,10 +51,9 @@ interface ManagedTerminal {
   terminal: vscode.Terminal;
   role: string;
   relativePath: string;
-  /** Process ID if available (VS Code 1.93+). Used as a fallback identifier. */
-  processId?: number;
-  /** Human-readable name used for diagnostics only (NOT for matching). */
   name: string;
+  /** Whether we've already fired the "stopped" callback for this terminal. */
+  closed: boolean;
 }
 
 export class StartupRunner {
@@ -68,15 +67,17 @@ export class StartupRunner {
   private managedTerminals: ManagedTerminal[] = [];
 
   /**
-   * Issue #26 fix: Track terminals that were explicitly killed by killAll().
-   * When onDidCloseTerminal fires for these, we ignore them — they were
-   * killed by us, not by the user, so they should NOT trigger a
-   * "service stopped" status update.
+   * Polls every managed terminal's `exitStatus` every 1 second.
+   * When a process exits (crash, normal exit, or user Ctrl+C), the
+   * terminal's `exitStatus` becomes defined and we mark the service
+   * as stopped.
    *
-   * This prevents the "toggle" bug where restarting services causes the
-   * old terminal's close event to mark the new terminal as stopped.
+   * This is necessary because `onDidCloseTerminal` only fires when
+   * the terminal PANEL is closed (trash icon), NOT when the process
+   * inside it exits. VS Code keeps the terminal open after process
+   * exit, showing the last output.
    */
-  private _killedTerminals = new Set<vscode.Terminal>();
+  private _exitPoller?: NodeJS.Timeout;
 
   constructor(opts: StartupRunnerOptions) {
     this.apps             = opts.apps;
@@ -87,7 +88,6 @@ export class StartupRunner {
     this.logger           = opts.logger;
   }
 
-  // ── Logging helper ──────────────────────────────────────────────
   private log(message: string): void {
     this.logger?.appendLine(`[StartupRunner] ${message}`);
   }
@@ -127,11 +127,7 @@ export class StartupRunner {
       this._launchInTerminal(app);
     }
 
-    this.timeline.updateEvent(
-      parentEvent.id,
-      'success',
-      `${appsWithScript.length} terminal(s) launched`
-    );
+    this.timeline.updateEvent(parentEvent.id, 'success', `${appsWithScript.length} terminal(s) launched`);
 
     this.streamer.system(
       `${appsWithScript.length} service(s) started in VS Code terminals` +
@@ -142,6 +138,9 @@ export class StartupRunner {
     for (const mt of this.managedTerminals) {
       this.log(`  - ${mt.role} [${mt.relativePath}] name="${mt.name}"`);
     }
+
+    // Start polling for process exits (crash detection).
+    this._startExitPolling();
   }
 
   private _launchInTerminal(
@@ -172,31 +171,13 @@ export class StartupRunner {
 
     const role = app.isFrontend ? 'Frontend' : app.isBackend ? 'Backend' : app.label;
 
-    // Track this terminal as managed — reference equality is used for
-    // matching (NOT name match, which caused the toggle bug in issue #26).
     const managed: ManagedTerminal = {
       terminal,
       role,
       relativePath: app.relativePath,
       name,
+      closed: false,
     };
-
-    // Try to get the process ID asynchronously (available in VS Code 1.93+).
-    try {
-      const pidPromise = terminal.processId as PromiseLike<number | undefined>;
-      if (pidPromise && typeof pidPromise.then === 'function') {
-        pidPromise.then((pid) => {
-          if (typeof pid === 'number') {
-            managed.processId = pid;
-            this.log(`Terminal "${name}" processId = ${pid}`);
-          }
-        }, () => {
-          // processId may not be available on all platforms / VS Code versions.
-        });
-      }
-    } catch {
-      // Ignore — processId is optional and only used for diagnostics.
-    }
 
     this.managedTerminals.push(managed);
 
@@ -221,89 +202,160 @@ export class StartupRunner {
     return terminal;
   }
 
+  // ── Exit-status polling (crash detection) ───────────────────────
+
+  private _startExitPolling(): void {
+    if (this._exitPoller) return;
+    this.log('Starting exit-status poller (1s interval)');
+    this._exitPoller = setInterval(() => {
+      this._checkTerminalExits();
+    }, 1000);
+  }
+
+  private _stopExitPolling(): void {
+    if (this._exitPoller) {
+      this.log('Stopping exit-status poller');
+      clearInterval(this._exitPoller);
+      this._exitPoller = undefined;
+    }
+  }
+
   /**
-   * Check if a terminal is managed by this runner.
-   *
-   * Uses REFERENCE EQUALITY ONLY (mt.terminal === terminal).
-   *
-   * We do NOT match by name — matching by name caused a toggle bug where
-   * restarting services would make the old terminal's close event
-   * incorrectly match the new terminal (which has the same name) and
-   * mark it as stopped.
-   *
-   * Called by SidebarProvider's onDidCloseTerminal listener (issue #26).
+   * Check each managed terminal's `exitStatus`.
+   * When a process exits (crash, Ctrl+C, or normal exit), the
+   * `exitStatus` becomes defined. We then mark the service as stopped.
    */
-  isManagedTerminal(terminal: vscode.Terminal): boolean {
-    // If this terminal was explicitly killed by killAll(), ignore it.
-    // This is the key fix for the toggle bug.
-    if (this._killedTerminals.has(terminal)) {
-      this.log(`isManagedTerminal: terminal "${terminal.name}" was killed by killAll() — ignoring close event`);
-      return false;
+  private _checkTerminalExits(): void {
+    for (const mt of this.managedTerminals) {
+      if (mt.closed) continue;
+
+      let status: vscode.TerminalExitStatus | undefined;
+      try {
+        status = mt.terminal.exitStatus;
+      } catch {
+        // Terminal object may be in a bad state — skip.
+        continue;
+      }
+
+      if (status !== undefined) {
+        this.log(`_checkTerminalExits: "${mt.name}" process exited (code=${status.code}, reason=${status.reason})`);
+        this._handleProcessExit(mt, status);
+      }
+    }
+  }
+
+  /**
+   * Called when a managed terminal's process exits (detected via polling).
+   * This handles the case where the process crashes or is killed with
+   * Ctrl+C but the terminal panel stays open.
+   */
+  private _handleProcessExit(mt: ManagedTerminal, status: vscode.TerminalExitStatus): void {
+    if (mt.closed) return;
+    mt.closed = true;
+
+    this.log(`_handleProcessExit: ${mt.role} [${mt.relativePath}] exited with code ${status.code}`);
+
+    // Remove from managed list.
+    const idx = this.managedTerminals.indexOf(mt);
+    if (idx >= 0) {
+      this.managedTerminals.splice(idx, 1);
     }
 
-    // Reference equality only.
+    // Update service status to 'stopped'
+    this.onServiceStatus?.({
+      label: mt.role,
+      relativePath: mt.relativePath,
+      state: 'stopped',
+    });
+
+    // Record timeline event
+    const stopEvent = this.timeline.addEvent(
+      `${mt.role} service stopped`,
+      'success'
+    );
+    this.timeline.updateEvent(
+      stopEvent.id,
+      'success',
+      `Process exited (code ${status.code})`
+    );
+
+    // Emit log entry
+    const logEntry: LogEntry = {
+      id: uid(),
+      level: status.code === 0 ? 'system' : 'error',
+      source: `${mt.role} [${mt.relativePath}]`,
+      message: `${mt.role} service stopped (process exited with code ${status.code})`,
+      timestamp: now(),
+      category: mt.role === 'Frontend' ? 'FRONTEND' : mt.role === 'Backend' ? 'BACKEND' : 'SYSTEM',
+    };
+    this.streamer.emit('log', logEntry);
+
+    this.streamer.system(
+      `${mt.role} service stopped (process exited, code ${status.code})`,
+      `${mt.role} [${mt.relativePath}]`
+    );
+
+    this.log(`_handleProcessExit: DONE — ${mt.role} marked stopped`);
+  }
+
+  // ── Terminal-close handling (manual close via trash icon) ───────
+
+  /**
+   * Check if a terminal is managed by this runner.
+   * Uses REFERENCE EQUALITY ONLY (no name match — name match caused
+   * the toggle bug where restarting services made old close events
+   * match new terminals with the same name).
+   */
+  isManagedTerminal(terminal: vscode.Terminal): boolean {
     const byRef = this.managedTerminals.some((mt) => mt.terminal === terminal);
     if (byRef) {
       this.log(`isManagedTerminal: matched by reference for "${terminal.name}"`);
       return true;
     }
-
-    this.log(`isManagedTerminal: NO MATCH for terminal "${terminal.name}" (managed: ${this.managedTerminals.map(m => `"${m.name}"`).join(', ') || 'none'})`);
+    this.log(`isManagedTerminal: NO MATCH for terminal "${terminal.name}"`);
     return false;
   }
 
   /**
-   * Handle terminal close — called by SidebarProvider when a terminal
-   * is closed. Updates service status, records timeline event, and
-   * emits a log entry.
-   *
-   * Returns true if the terminal was managed and handled, false otherwise.
+   * Handle terminal close — called by SidebarProvider's
+   * onDidCloseTerminal listener when the user clicks the trash icon.
    */
   handleTerminalClose(closedTerminal: vscode.Terminal): boolean {
-    // If this terminal was explicitly killed by killAll(), ignore it.
-    if (this._killedTerminals.has(closedTerminal)) {
-      this.log(`handleTerminalClose: terminal "${closedTerminal.name}" was killed by killAll() — ignoring (not a user-initiated close)`);
-      this._killedTerminals.delete(closedTerminal);
-      return false;
-    }
-
-    // Reference equality only — do NOT match by name.
     const idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
 
     if (idx === -1) {
-      this.log(`handleTerminalClose: terminal "${closedTerminal.name}" not found in managed list — already removed or not managed`);
+      this.log(`handleTerminalClose: "${closedTerminal.name}" not in managed list — ignoring`);
       return false;
     }
 
     const managed = this.managedTerminals[idx];
+    if (managed.closed) {
+      this.log(`handleTerminalClose: "${managed.name}" already marked closed — ignoring`);
+      return false;
+    }
+    managed.closed = true;
+
     this.managedTerminals.splice(idx, 1);
 
     this.log(`handleTerminalClose: processing close for ${managed.role} [${managed.relativePath}]`);
 
-    // Update service status to 'stopped'
     this.onServiceStatus?.({
       label: managed.role,
       relativePath: managed.relativePath,
       state: 'stopped',
     });
 
-    // Record timeline event
     const stopEvent = this.timeline.addEvent(
       `${managed.role} service stopped`,
       'success'
     );
-    this.timeline.updateEvent(
-      stopEvent.id,
-      'success',
-      `Terminal closed by user`
-    );
+    this.timeline.updateEvent(stopEvent.id, 'success', `Terminal closed by user`);
 
-    // Emit log entry
     const logEntry: LogEntry = {
       id: uid(),
       level: 'system',
       source: `${managed.role} [${managed.relativePath}]`,
-      message: `${managed.role} service stopped`,
+      message: `${managed.role} service stopped (terminal closed)`,
       timestamp: now(),
       category: managed.role === 'Frontend' ? 'FRONTEND' : managed.role === 'Backend' ? 'BACKEND' : 'SYSTEM',
     };
@@ -314,16 +366,12 @@ export class StartupRunner {
       `${managed.role} [${managed.relativePath}]`
     );
 
-    // Also fire the onTerminalClosed callback if provided
     this.onTerminalClosed?.(closedTerminal, managed.role, managed.relativePath);
 
-    this.log(`handleTerminalClose: DONE — ${managed.role} marked stopped, timeline + log updated`);
+    this.log(`handleTerminalClose: DONE — ${managed.role} marked stopped`);
     return true;
   }
 
-  /**
-   * Get a snapshot of managed terminals for diagnostic purposes.
-   */
   getManagedTerminalsInfo(): Array<{ role: string; relativePath: string; name: string }> {
     return this.managedTerminals.map((mt) => ({
       role: mt.role,
@@ -335,28 +383,24 @@ export class StartupRunner {
   /**
    * Kill all managed terminals.
    *
-   * IMPORTANT: We clear `managedTerminals` BEFORE disposing so that
-   * if onDidCloseTerminal fires synchronously during dispose, the
-   * terminal is already gone from the list and won't be matched.
+   * CRITICAL ORDER:
+   * 1. Stop the exit poller FIRST (so it doesn't fire during dispose)
+   * 2. Clear managedTerminals (so onDidCloseTerminal finds empty list)
+   * 3. Dispose each terminal
    *
-   * We also add each terminal to `_killedTerminals` so that when
-   * onDidCloseTerminal fires asynchronously LATER (for the old
-   * terminals), the handler ignores them — they were killed by us,
-   * not by the user, so they should NOT mark the new (replacement)
-   * terminals as stopped.
+   * This prevents the toggle bug where old terminals' close events
+   * mark new (replacement) terminals as stopped.
    */
   killAll(): void {
-    // Snapshot the list and clear it FIRST.
+    this._stopExitPolling();
+
     const toKill = this.managedTerminals.splice(0);
-    this.log(`killAll: disposing ${toKill.length} managed terminal(s) (list cleared first)`);
+    this.log(`killAll: disposing ${toKill.length} managed terminal(s)`);
 
     for (const mt of toKill) {
+      mt.closed = true; // Prevent any handler from firing for this terminal
       try {
-        // Mark this terminal as killed so the async close event is ignored.
-        this._killedTerminals.add(mt.terminal);
-
         mt.terminal.dispose();
-
         this.onServiceStatus?.({
           label: mt.role,
           relativePath: mt.relativePath,
@@ -364,17 +408,9 @@ export class StartupRunner {
         });
       } catch { /* already disposed */ }
     }
-
-    // Note: we do NOT clear _killedTerminals here. The terminals stay
-    // in the set until their close events fire and are ignored, at
-    // which point handleTerminalClose removes them individually.
-    // This set is on the OLD runner instance, which gets disposed
-    // after killAll() returns, so memory is reclaimed when the
-    // runner is garbage-collected.
   }
 
   dispose(): void {
-    // No closeDisposable to dispose — terminal-close listener is managed
-    // by the SidebarProvider / context.subscriptions.
+    this._stopExitPolling();
   }
 }
