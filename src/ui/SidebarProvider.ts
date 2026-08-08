@@ -31,6 +31,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _setupRunning = false;
   private _settingsManager: SettingsManager;
 
+  // Issue #26: persistent terminal-close listener.
+  // Registered ONCE in the SidebarProvider constructor and added to
+  // context.subscriptions so VS Code disposes it automatically.
+  private _terminalCloseDisposable?: vscode.Disposable;
+
+  // Issue #26: OutputChannel for diagnostic logging.
+  private _logger: vscode.OutputChannel;
+
+  // Issue #26: keep references to the current timeline/streamer so
+  // the terminal-close handler can emit events through them.
+  private _currentTimeline?: ActivityTimeline;
+  private _currentStreamer?: LogStreamer;
+
   private _summary: SetupSummary = {
     depsInstalled: false,
     envGenerated: false,
@@ -46,9 +59,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _context: vscode.ExtensionContext
+    private readonly _context: vscode.ExtensionContext,
+    logger: vscode.OutputChannel
   ) {
     this._settingsManager = new SettingsManager(_context);
+    this._logger = logger;
+
+    // Issue #26: register the terminal-close listener ONCE here.
+    // This listener persists for the entire extension lifetime.
+    this._terminalCloseDisposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+      this._onTerminalClosed(closedTerminal);
+    });
+    this._context.subscriptions.push(this._terminalCloseDisposable);
+
+    this._log('SidebarProvider constructed — onDidCloseTerminal listener registered');
+  }
+
+  // ── Logging helper ──────────────────────────────────────────────
+  private _log(message: string): void {
+    this._logger.appendLine(`[SidebarProvider] ${message}`);
   }
 
   resolveWebviewView(
@@ -69,12 +98,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       (message: WebviewToExtensionMessage) => {
         switch (message.type) {
           case 'ready':
+            this._log('Webview ready — sending analysis + service statuses');
             if (this._analysis) {
               this._postMessage({ type: 'analysisResult', payload: this._analysis });
             } else {
               this._triggerAnalysis();
             }
             this._sendSettings();
+            // Issue #26: re-send all current service statuses so the
+            // webview recovers its state after a reload.
+            this._sendAllServiceStatuses();
             break;
 
           case 'runSetup':
@@ -93,7 +126,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._settingsManager.save(message.payload).then(() => {
               this._sendSettings();
               if (this._getSettings().showNotifications) {
-                vscode.window.showInformationMessage('RepoStart: Settings saved ✓');
+                vscode.window.showInformationMessage('RepoStart: Settings saved');
               }
             });
             break;
@@ -120,7 +153,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-
   focus(): void {
     this._view?.show(true);
   }
@@ -138,7 +170,64 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this._log('SidebarProvider.dispose() called');
     this._startupRunner?.killAll();
+    this._startupRunner?.dispose();
+    this._startupRunner = undefined;
+    // Note: _terminalCloseDisposable is already in context.subscriptions,
+    // so VS Code will dispose it automatically.
+  }
+
+  /**
+   * Issue #26: Called when ANY terminal in VS Code is closed.
+   * Delegates to the active StartupRunner if the terminal is managed.
+   *
+   * Logs every step so the user can verify in the Output panel
+   * (View → Output → "RepoStart") that the handler is firing.
+   */
+  private _onTerminalClosed(closedTerminal: vscode.Terminal): void {
+    const ts = new Date().toISOString();
+    this._log(`──────────────────────────────────────────`);
+    this._log(`onDidCloseTerminal FIRED at ${ts}`);
+    this._log(`  Terminal name: "${closedTerminal.name}"`);
+    this._log(`  Exit status:   ${JSON.stringify(closedTerminal.exitStatus)}`);
+
+    if (!this._startupRunner) {
+      this._log(`  → No active StartupRunner — ignoring (no services running)`);
+      return;
+    }
+
+    const managed = this._startupRunner.getManagedTerminalsInfo();
+    this._log(`  Active runner manages ${managed.length} terminal(s):`);
+    for (const m of managed) {
+      this._log(`    - ${m.role} [${m.relativePath}] name="${m.name}"`);
+    }
+
+    if (!this._startupRunner.isManagedTerminal(closedTerminal)) {
+      this._log(`  → Terminal NOT managed by RepoStart — ignoring`);
+      return;
+    }
+
+    this._log(`  → Terminal IS managed — calling handleTerminalClose()`);
+    const handled = this._startupRunner.handleTerminalClose(closedTerminal);
+    this._log(`  → handleTerminalClose returned: ${handled}`);
+    this._log(`──────────────────────────────────────────`);
+  }
+
+  /**
+   * Issue #26: Re-send all current service statuses to the webview.
+   * Called when the webview sends `ready` (e.g., after a reload) so
+   * the dashboard shows the correct running/stopped state.
+   */
+  private _sendAllServiceStatuses(): void {
+    if (this._serviceStatuses.length === 0) {
+      this._log('_sendAllServiceStatuses: no statuses to send');
+      return;
+    }
+    this._log(`_sendAllServiceStatuses: sending ${this._serviceStatuses.length} status(es) to webview`);
+    for (const status of this._serviceStatuses) {
+      this._postMessage({ type: 'serviceStatusUpdate', payload: status });
+    }
   }
 
   private async _triggerAnalysis(): Promise<void> {
@@ -156,7 +245,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this._postMessage({ type: 'analysisResult', payload: analysis });
     } catch (err) {
       vscode.window.showErrorMessage(
-        `RepoStart: Analysis failed — ${(err as Error).message}`
+        `RepoStart: Analysis failed - ${(err as Error).message}`
       );
     }
   }
@@ -168,7 +257,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _sendSettings(): void {
     this._postMessage({ type: 'settingsLoaded', payload: this._getSettings() });
   }
-
 
   private async _runSetup(): Promise<void> {
     if (this._setupRunning) {
@@ -196,9 +284,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const timeline = new ActivityTimeline();
     const streamer = new LogStreamer();
 
+    this._currentTimeline = timeline;
+    this._currentStreamer = streamer;
+
     timeline.on('update', (event: TimelineEvent) => {
       this._postMessage({ type: 'timelineUpdate', payload: event });
-      // Accumulate: upsert by id so updates overwrite the original add
       const idx = this._timelineEvents.findIndex((e) => e.id === event.id);
       if (idx >= 0) { this._timelineEvents[idx] = event; }
       else { this._timelineEvents.push(event); }
@@ -210,8 +300,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     try {
-      const detectEvent = timeline.addEvent('✓ Repository detected', 'running');
-      streamer.system('RepoStart starting setup…');
+      const detectEvent = timeline.addEvent('Repository detected', 'running');
+      streamer.system('RepoStart starting setup...');
 
       let analysis = this._analysis;
       if (!analysis) {
@@ -221,26 +311,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       timeline.updateEvent(detectEvent.id, 'success', `Root: ${rootPath}`);
 
-      const archEvent = timeline.addEvent('✓ Architecture analyzed', 'running');
+      const archEvent = timeline.addEvent('Architecture analyzed', 'running');
 
       const fe = analysis.apps.find((a) => a.isFrontend);
       const be = analysis.apps.find((a) => a.isBackend);
       if (fe) {
-        const fev = timeline.addEvent(`✓ Frontend detected (${fe.relativePath})`, 'success');
+        const fev = timeline.addEvent(`Frontend detected (${fe.relativePath})`, 'success');
         timeline.updateEvent(fev.id, 'success', fe.framework);
       }
       if (be) {
-        const bev = timeline.addEvent(`✓ Backend detected (${be.relativePath})`, 'success');
+        const bev = timeline.addEvent(`Backend detected (${be.relativePath})`, 'success');
         timeline.updateEvent(bev.id, 'success', be.framework);
       }
 
-      const pmEv = timeline.addEvent('✓ Package manager detected', 'success');
+      const pmEv = timeline.addEvent('Package manager detected', 'success');
       timeline.updateEvent(pmEv.id, 'success', analysis.packageManager);
 
       const hasApps = analysis.apps && analysis.apps.length > 0;
       const hasPython = analysis.pythonProjects && analysis.pythonProjects.length > 0;
-      streamer.system(`Architecture: ${analysis.architecture} · ${analysis.apps.length} Node app(s) · ${analysis.pythonProjects?.length || 0} Python project(s)`);
-      
+      streamer.system(`Architecture: ${analysis.architecture} | ${analysis.apps.length} Node app(s) | ${analysis.pythonProjects?.length || 0} Python project(s)`);
+
       const appPaths = [
         ...analysis.apps.map((a) => a.relativePath),
         ...(analysis.pythonProjects || []).map((p) => p.relativePath),
@@ -249,7 +339,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       timeline.updateEvent(
         archEvent.id,
         'success',
-        `${analysis.architecture} — ${appPaths}`
+        `${analysis.architecture} - ${appPaths}`
       );
 
       if (!hasApps && !hasPython) {
@@ -313,18 +403,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await this._launchApps(analysis.apps, timeline, streamer, settings);
         this._summary.appsStarted = true;
       } else {
-        const skipEv = timeline.addEvent('Auto Run disabled — skipping service launch', 'skipped');
+        const skipEv = timeline.addEvent('Auto Run disabled - skipping service launch', 'skipped');
         timeline.updateEvent(skipEv.id, 'skipped');
       }
 
       const completeEvent = timeline.addEvent(TimelineStep.COMPLETE, 'success');
-      timeline.updateEvent(completeEvent.id, 'success', '✓ Applications running');
-      streamer.system('✓ RepoStart setup complete!');
+      timeline.updateEvent(completeEvent.id, 'success', 'Applications running');
+      streamer.system('RepoStart setup complete!');
 
       this._postMessage({ type: 'setupSummaryUpdate', payload: this._summary });
       this._postMessage({
         type: 'setupComplete',
-        payload: { success: true, message: 'Setup complete — services running' },
+        payload: { success: true, message: 'Setup complete - services running' },
       });
 
       if (settings.showNotifications) {
@@ -332,11 +422,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       const message = (err as Error).message;
-      streamer.system(`✗ Setup failed: ${message}`);
+      streamer.system(`Setup failed: ${message}`);
       this._summary.errorCount++;
       this._postMessage({ type: 'setupSummaryUpdate', payload: this._summary });
       this._postMessage({ type: 'setupComplete', payload: { success: false, message } });
-      vscode.window.showErrorMessage(`RepoStart: Setup failed — ${message}`);
+      vscode.window.showErrorMessage(`RepoStart: Setup failed - ${message}`);
     } finally {
       this._setupRunning = false;
     }
@@ -363,6 +453,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const settings = this._getSettings();
     const timeline = new ActivityTimeline();
     const streamer = new LogStreamer();
+
+    this._currentTimeline = timeline;
+    this._currentStreamer = streamer;
+
     this._timelineEvents = [];
     this._logs = [];
 
@@ -378,7 +472,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this._postMessage({ type: 'clearLogs' });
-    streamer.system('RepoStart: Run Project — launching applications…');
+    streamer.system('RepoStart: Run Project - launching applications...');
 
     try {
       await this._launchApps(analysis.apps, timeline, streamer, settings);
@@ -404,11 +498,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return true;
     });
 
+    this._log('_launchApps: killing old terminals');
+    this._startupRunner?.killAll();
+    this._startupRunner?.dispose();
+
     const runner = new StartupRunner({
       apps: filtered,
       timeline,
       streamer,
+      logger: this._logger,
       onServiceStatus: (status: ServiceStatus) => {
+        this._log(`onServiceStatus: ${status.label} [${status.relativePath}] → ${status.state}`);
         const idx = this._serviceStatuses.findIndex(
           (s) => s.relativePath === status.relativePath
         );
@@ -421,10 +521,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
     });
 
-    this._startupRunner?.killAll();
     this._startupRunner = runner;
+    this._log('_launchApps: new StartupRunner created, calling start()');
 
     await runner.start();
+
+    this._log('_launchApps: runner.start() completed');
   }
 
   private async _downloadReport(): Promise<void> {
@@ -443,25 +545,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const errorEntries = this._logs.filter((e) => e.level === 'error');
 
     const lines: string[] = [
-      '══════════════════════════════════════════',
+      '==========================================',
       '  RepoStart Setup Report',
-      '══════════════════════════════════════════',
+      '==========================================',
       '',
       `Repository:       ${repoName}`,
       `Timestamp:        ${timestamp}`,
       `Root Path:        ${analysis.rootPath}`,
       '',
-      '── Architecture ───────────────────────────',
+      '-- Architecture ---------------------------',
       `Architecture:     ${analysis.architecture}`,
       `Frontend:         ${fe ? `${fe.framework} (${fe.relativePath})` : 'None'}`,
       `Backend:          ${be ? `${be.framework} (${be.relativePath})` : 'None'}`,
       `Package Manager:  ${analysis.packageManager}`,
       '',
-      '── Environment ────────────────────────────',
-      `Environment:      ${analysis.envStatus === 'configured' ? '✓ Configured' : 'Not Required'}`,
+      '-- Environment ----------------------------',
+      `Environment:      ${analysis.envStatus === 'configured' ? 'Configured' : 'Not Required'}`,
       '',
       ...(analysis.pythonProjects && analysis.pythonProjects.length > 0 ? [
-        '── Python Environments ────────────────────',
+        '-- Python Environments --------------------',
         ...analysis.pythonProjects.flatMap((p) => {
           const venvName = p.venvName || '.venv';
           const rootSuffix = p.relativePath === '.' ? '' : ` (${p.relativePath})`;
@@ -489,36 +591,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }),
         ''
       ] : []),
-      '── Setup Results ──────────────────────────',
-      `Dependencies:     ${this._summary.depsInstalled ? '✓ Installed' : '✗ Failed'}`,
-      `Environment:      ${this._summary.envGenerated  ? '✓ Generated' : 'Not Required'}`,
-      `Applications:     ${this._summary.appsStarted   ? '✓ Started'  : 'Not Started'}`,
+      '-- Setup Results --------------------------',
+      `Dependencies:     ${this._summary.depsInstalled ? 'Installed' : 'Failed'}`,
+      `Environment:      ${this._summary.envGenerated  ? 'Generated' : 'Not Required'}`,
+      `Applications:     ${this._summary.appsStarted   ? 'Started'  : 'Not Started'}`,
       `Errors:           ${this._summary.errorCount}`,
       '',
-      '── Service Status ─────────────────────────',
+      '-- Service Status -------------------------',
       ...this._serviceStatuses.map(
-        (s) => `${s.label.padEnd(16)}  ${s.state === 'running' ? '🟢 Running' : '🔴 Stopped'}`
+        (s) => `${s.label.padEnd(16)}  ${s.state === 'running' ? 'Running' : 'Stopped'}`
       ),
       '',
-      '── Apps Detected ──────────────────────────',
+      '-- Apps Detected --------------------------',
       ...analysis.apps.map(
         (a) =>
           `${a.relativePath.padEnd(20)}  ${a.framework}  ${a.isFrontend ? '[frontend]' : a.isBackend ? '[backend]' : '[app]'}  start: ${a.startScript ?? (a.startCommand ? `(${a.startCommand})` : 'none')}`
       ),
       '',
-      '── Error Summary ──────────────────────────',
+      '-- Error Summary --------------------------',
       ...(errorEntries.length === 0
         ? ['  No errors recorded.']
         : errorEntries.map((e) => {
             const time = new Date(e.timestamp).toLocaleTimeString('en-US', {
               hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
             });
-            return `✗ ${time}  [${e.source}]  ${e.message}`;
+            return `[!] ${time}  [${e.source}]  ${e.message}`;
           })),
       '',
-      '══════════════════════════════════════════',
+      '==========================================',
       '  Generated by RepoStart',
-      '══════════════════════════════════════════',
+      '==========================================',
     ];
 
     const content = lines.join('\n');
@@ -553,24 +655,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const statusIcon = (status: import('../types').TimelineEventStatus): string => {
       switch (status) {
-        case 'success': return '✓';
-        case 'error':   return '✗';
-        case 'running': return '▶';
-        case 'skipped': return '○';
-        default:        return '·';
+        case 'success': return '[v]';
+        case 'error':   return '[x]';
+        case 'running': return '[>]';
+        case 'skipped': return '[o]';
+        default:        return '[.]';
       }
     };
 
     const lines: string[] = [
-      '══════════════════════════════════════════',
+      '==========================================',
       '  RepoStart Timeline Report',
-      '══════════════════════════════════════════',
+      '==========================================',
       '',
       `Repository:  ${repoName}`,
       `Exported:    ${timestamp}`,
       `Events:      ${this._timelineEvents.length}`,
       '',
-      '── Timeline ───────────────────────────────',
+      '-- Timeline -------------------------------',
       '',
       ...this._timelineEvents.map((e) => {
         const icon = statusIcon(e.status);
@@ -581,9 +683,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return `${icon}  ${time}  ${e.label}${detail}`;
       }),
       '',
-      '══════════════════════════════════════════',
+      '==========================================',
       '  Generated by RepoStart',
-      '══════════════════════════════════════════',
+      '==========================================',
     ];
 
     const content = lines.join('\n');
@@ -615,15 +717,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const timestamp = new Date().toISOString();
 
     const lines: string[] = [
-      '══════════════════════════════════════════',
+      '==========================================',
       '  RepoStart Log Export',
-      '══════════════════════════════════════════',
+      '==========================================',
       '',
       `Repository:  ${repoName}`,
       `Exported:    ${timestamp}`,
       `Entries:     ${this._logs.length}`,
       '',
-      '── Logs ───────────────────────────────────',
+      '-- Logs -----------------------------------',
       '',
       ...this._logs.map((e) => {
         const cat = e.category
@@ -643,9 +745,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return `[${cat}] ${time}  ${e.message}`;
       }),
       '',
-      '══════════════════════════════════════════',
+      '==========================================',
       '  Generated by RepoStart',
-      '══════════════════════════════════════════',
+      '==========================================',
     ];
 
     const content = lines.join('\n');
@@ -668,6 +770,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _postMessage(message: ExtensionToWebviewMessage): void {
     if (this._view?.webview) {
       this._view.webview.postMessage(message);
+    } else {
+      this._log(`_postMessage: view not ready — message "${message.type}" dropped`);
     }
   }
 
