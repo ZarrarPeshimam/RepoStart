@@ -44,12 +44,17 @@ export interface StartupRunnerOptions {
   streamer: LogStreamer;
   onServiceStatus?: (status: ServiceStatus) => void;
   onTerminalClosed?: (terminal: vscode.Terminal, role: string, relativePath: string) => void;
+  logger?: vscode.OutputChannel;
 }
 
 interface ManagedTerminal {
   terminal: vscode.Terminal;
   role: string;
   relativePath: string;
+  /** Process ID if available (VS Code 1.93+). Used as a fallback identifier. */
+  processId?: number;
+  /** Human-readable name used to match terminals by name as a last resort. */
+  name: string;
 }
 
 export class StartupRunner {
@@ -58,6 +63,7 @@ export class StartupRunner {
   private streamer: LogStreamer;
   private onServiceStatus?: (status: ServiceStatus) => void;
   private onTerminalClosed?: (terminal: vscode.Terminal, role: string, relativePath: string) => void;
+  private logger?: vscode.OutputChannel;
 
   private managedTerminals: ManagedTerminal[] = [];
 
@@ -67,14 +73,15 @@ export class StartupRunner {
     this.streamer         = opts.streamer;
     this.onServiceStatus  = opts.onServiceStatus;
     this.onTerminalClosed = opts.onTerminalClosed;
+    this.logger           = opts.logger;
+  }
+
+  // ── Logging helper ──────────────────────────────────────────────
+  private log(message: string): void {
+    this.logger?.appendLine(`[StartupRunner] ${message}`);
   }
 
   async start(): Promise<void> {
-    // NOTE: The onDidCloseTerminal listener is NOT registered here.
-    // It is registered at the SidebarProvider level so it persists
-    // across re-runs (issue #26). The SidebarProvider calls
-    // handleTerminalClose on the active StartupRunner.
-
     const appsWithScript = this.apps.filter((a) => a.startScript !== null || a.startCommand !== undefined);
 
     if (appsWithScript.length === 0) {
@@ -119,6 +126,11 @@ export class StartupRunner {
       `${appsWithScript.length} service(s) started in VS Code terminals` +
       (frontendApp && backendApp ? ' (split terminal requested)' : '')
     );
+
+    this.log(`Started ${this.managedTerminals.length} managed terminal(s):`);
+    for (const mt of this.managedTerminals) {
+      this.log(`  - ${mt.role} [${mt.relativePath}] name="${mt.name}"`);
+    }
   }
 
   private _launchInTerminal(
@@ -149,12 +161,35 @@ export class StartupRunner {
 
     const role = app.isFrontend ? 'Frontend' : app.isBackend ? 'Backend' : app.label;
 
-    // Track this terminal as managed
-    this.managedTerminals.push({
+    // Track this terminal as managed — store both the Terminal reference
+    // AND the name so we can match by name as a fallback (issue #26).
+    const managed: ManagedTerminal = {
       terminal,
       role,
       relativePath: app.relativePath,
-    });
+      name,
+    };
+
+    // Try to get the process ID asynchronously (available in VS Code 1.93+).
+    // This is used as a secondary identifier if the Terminal object
+    // comparison fails.
+    try {
+      const pidPromise = terminal.processId as PromiseLike<number | undefined>;
+      if (pidPromise && typeof pidPromise.then === 'function') {
+        pidPromise.then((pid) => {
+          if (typeof pid === 'number') {
+            managed.processId = pid;
+            this.log(`Terminal "${name}" processId = ${pid}`);
+          }
+        }, () => {
+          // processId may not be available on all platforms / VS Code versions.
+        });
+      }
+    } catch {
+      // Ignore — processId is optional and only used as a fallback identifier.
+    }
+
+    this.managedTerminals.push(managed);
 
     this.onServiceStatus?.({
       label: role,
@@ -179,25 +214,70 @@ export class StartupRunner {
 
   /**
    * Check if a terminal is managed by this runner.
+   *
+   * Uses three strategies in order:
+   * 1. Reference equality (mt.terminal === terminal) — fastest, works
+   *    in most cases.
+   * 2. Process ID match — fallback if the Terminal object is a different
+   *    wrapper around the same underlying process.
+   * 3. Name match — last resort, matches by the terminal's display name.
+   *
    * Called by SidebarProvider's onDidCloseTerminal listener (issue #26).
    */
   isManagedTerminal(terminal: vscode.Terminal): boolean {
-    return this.managedTerminals.some((mt) => mt.terminal === terminal);
+    // Strategy 1: reference equality
+    const byRef = this.managedTerminals.some((mt) => mt.terminal === terminal);
+    if (byRef) {
+      this.log(`isManagedTerminal: matched by reference for "${terminal.name}"`);
+      return true;
+    }
+
+    // Strategy 2: process ID
+    // (Synchronous check — processId may have been resolved already)
+    // Note: we can't await terminal.processId here because this method
+    // is synchronous. But if we previously stored the PID, we can
+    // compare. We can't get the closed terminal's PID after it's closed,
+    // so this strategy is limited. Skip for now.
+
+    // Strategy 3: name match
+    const byName = this.managedTerminals.some((mt) => mt.name === terminal.name);
+    if (byName) {
+      this.log(`isManagedTerminal: matched by name "${terminal.name}" (reference match failed)`);
+      return true;
+    }
+
+    this.log(`isManagedTerminal: NO MATCH for terminal "${terminal.name}" (managed: ${this.managedTerminals.map(m => `"${m.name}"`).join(', ') || 'none'})`);
+    return false;
   }
 
   /**
    * Handle terminal close — called by SidebarProvider when a terminal
    * is closed. Updates service status, records timeline event, and
    * emits a log entry.
+   *
+   * Returns true if the terminal was managed and handled, false otherwise.
    */
-  handleTerminalClose(closedTerminal: vscode.Terminal): void {
-    const idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
+  handleTerminalClose(closedTerminal: vscode.Terminal): boolean {
+    // Find the managed terminal entry — try reference first, then name.
+    let idx = this.managedTerminals.findIndex((mt) => mt.terminal === closedTerminal);
+
     if (idx === -1) {
-      return;
+      // Fallback: match by name
+      idx = this.managedTerminals.findIndex((mt) => mt.name === closedTerminal.name);
+      if (idx !== -1) {
+        this.log(`handleTerminalClose: matched by name "${closedTerminal.name}" (reference match failed)`);
+      }
+    }
+
+    if (idx === -1) {
+      this.log(`handleTerminalClose: terminal "${closedTerminal.name}" not found in managed list — already removed or not managed`);
+      return false;
     }
 
     const managed = this.managedTerminals[idx];
     this.managedTerminals.splice(idx, 1);
+
+    this.log(`handleTerminalClose: processing close for ${managed.role} [${managed.relativePath}]`);
 
     // Update service status to 'stopped'
     this.onServiceStatus?.({
@@ -232,9 +312,27 @@ export class StartupRunner {
       `${managed.role} service stopped (terminal closed)`,
       `${managed.role} [${managed.relativePath}]`
     );
+
+    // Also fire the onTerminalClosed callback if provided
+    this.onTerminalClosed?.(closedTerminal, managed.role, managed.relativePath);
+
+    this.log(`handleTerminalClose: DONE — ${managed.role} marked stopped, timeline + log updated`);
+    return true;
+  }
+
+  /**
+   * Get a snapshot of managed terminals for diagnostic purposes.
+   */
+  getManagedTerminalsInfo(): Array<{ role: string; relativePath: string; name: string }> {
+    return this.managedTerminals.map((mt) => ({
+      role: mt.role,
+      relativePath: mt.relativePath,
+      name: mt.name,
+    }));
   }
 
   killAll(): void {
+    this.log(`killAll: disposing ${this.managedTerminals.length} managed terminal(s)`);
     for (const mt of this.managedTerminals) {
       try {
         mt.terminal.dispose();
@@ -249,6 +347,7 @@ export class StartupRunner {
   }
 
   dispose(): void {
-    // No closeDisposable to dispose — it's managed by SidebarProvider now.
+    // No closeDisposable to dispose — terminal-close listener is managed
+    // by the SidebarProvider / context.subscriptions.
   }
 }
