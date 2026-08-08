@@ -32,14 +32,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _settingsManager: SettingsManager;
 
   // Issue #26: persistent terminal-close listener.
-  // Registered ONCE on the SidebarProvider (not on the StartupRunner)
-  // so it survives across re-runs. The callback delegates to the
-  // active StartupRunner's handleTerminalClose method.
+  // Registered ONCE in the SidebarProvider constructor and added to
+  // context.subscriptions so VS Code disposes it automatically.
   private _terminalCloseDisposable?: vscode.Disposable;
 
+  // Issue #26: OutputChannel for diagnostic logging.
+  private _logger: vscode.OutputChannel;
+
   // Issue #26: keep references to the current timeline/streamer so
-  // _handleTerminalClose can emit events through them even after
-  // _runSetup() or _runProject() has returned.
+  // the terminal-close handler can emit events through them.
   private _currentTimeline?: ActivityTimeline;
   private _currentStreamer?: LogStreamer;
 
@@ -58,17 +59,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _context: vscode.ExtensionContext
+    private readonly _context: vscode.ExtensionContext,
+    logger: vscode.OutputChannel
   ) {
     this._settingsManager = new SettingsManager(_context);
+    this._logger = logger;
 
-    // Issue #26: register the terminal-close listener ONCE here, on the
-    // SidebarProvider. This listener persists for the entire extension
-    // lifetime — it is NOT tied to any single StartupRunner instance.
-    // When a terminal is closed, we delegate to the active runner.
+    // Issue #26: register the terminal-close listener ONCE here.
+    // This listener persists for the entire extension lifetime.
     this._terminalCloseDisposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
       this._onTerminalClosed(closedTerminal);
     });
+    this._context.subscriptions.push(this._terminalCloseDisposable);
+
+    this._log('SidebarProvider constructed — onDidCloseTerminal listener registered');
+  }
+
+  // ── Logging helper ──────────────────────────────────────────────
+  private _log(message: string): void {
+    this._logger.appendLine(`[SidebarProvider] ${message}`);
   }
 
   resolveWebviewView(
@@ -89,12 +98,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       (message: WebviewToExtensionMessage) => {
         switch (message.type) {
           case 'ready':
+            this._log('Webview ready — sending analysis + service statuses');
             if (this._analysis) {
               this._postMessage({ type: 'analysisResult', payload: this._analysis });
             } else {
               this._triggerAnalysis();
             }
             this._sendSettings();
+            // Issue #26: re-send all current service statuses so the
+            // webview recovers its state after a reload.
+            this._sendAllServiceStatuses();
             break;
 
           case 'runSetup':
@@ -157,29 +170,64 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this._log('SidebarProvider.dispose() called');
     this._startupRunner?.killAll();
     this._startupRunner?.dispose();
     this._startupRunner = undefined;
-    // Issue #26: dispose the persistent terminal-close listener
-    this._terminalCloseDisposable?.dispose();
-    this._terminalCloseDisposable = undefined;
+    // Note: _terminalCloseDisposable is already in context.subscriptions,
+    // so VS Code will dispose it automatically.
   }
 
   /**
    * Issue #26: Called when ANY terminal in VS Code is closed.
    * Delegates to the active StartupRunner if the terminal is managed.
+   *
+   * Logs every step so the user can verify in the Output panel
+   * (View → Output → "RepoStart") that the handler is firing.
    */
   private _onTerminalClosed(closedTerminal: vscode.Terminal): void {
+    const ts = new Date().toISOString();
+    this._log(`──────────────────────────────────────────`);
+    this._log(`onDidCloseTerminal FIRED at ${ts}`);
+    this._log(`  Terminal name: "${closedTerminal.name}"`);
+    this._log(`  Exit status:   ${JSON.stringify(closedTerminal.exitStatus)}`);
+
     if (!this._startupRunner) {
+      this._log(`  → No active StartupRunner — ignoring (no services running)`);
       return;
     }
+
+    const managed = this._startupRunner.getManagedTerminalsInfo();
+    this._log(`  Active runner manages ${managed.length} terminal(s):`);
+    for (const m of managed) {
+      this._log(`    - ${m.role} [${m.relativePath}] name="${m.name}"`);
+    }
+
     if (!this._startupRunner.isManagedTerminal(closedTerminal)) {
+      this._log(`  → Terminal NOT managed by RepoStart — ignoring`);
       return;
     }
-    // Delegate to the runner — it will fire onServiceStatus, add
-    // timeline events, and emit log entries through the timeline
-    // and streamer that are still referenced by the SidebarProvider.
-    this._startupRunner.handleTerminalClose(closedTerminal);
+
+    this._log(`  → Terminal IS managed — calling handleTerminalClose()`);
+    const handled = this._startupRunner.handleTerminalClose(closedTerminal);
+    this._log(`  → handleTerminalClose returned: ${handled}`);
+    this._log(`──────────────────────────────────────────`);
+  }
+
+  /**
+   * Issue #26: Re-send all current service statuses to the webview.
+   * Called when the webview sends `ready` (e.g., after a reload) so
+   * the dashboard shows the correct running/stopped state.
+   */
+  private _sendAllServiceStatuses(): void {
+    if (this._serviceStatuses.length === 0) {
+      this._log('_sendAllServiceStatuses: no statuses to send');
+      return;
+    }
+    this._log(`_sendAllServiceStatuses: sending ${this._serviceStatuses.length} status(es) to webview`);
+    for (const status of this._serviceStatuses) {
+      this._postMessage({ type: 'serviceStatusUpdate', payload: status });
+    }
   }
 
   private async _triggerAnalysis(): Promise<void> {
@@ -236,8 +284,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const timeline = new ActivityTimeline();
     const streamer = new LogStreamer();
 
-    // Issue #26: store references on the SidebarProvider so the
-    // terminal-close handler can emit events through them.
     this._currentTimeline = timeline;
     this._currentStreamer = streamer;
 
@@ -408,7 +454,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const timeline = new ActivityTimeline();
     const streamer = new LogStreamer();
 
-    // Issue #26: store references on the SidebarProvider
     this._currentTimeline = timeline;
     this._currentStreamer = streamer;
 
@@ -453,8 +498,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return true;
     });
 
-    // Kill old terminals (but don't dispose the terminal-close listener —
-    // it's managed by the SidebarProvider now, issue #26)
+    this._log('_launchApps: killing old terminals');
     this._startupRunner?.killAll();
     this._startupRunner?.dispose();
 
@@ -462,7 +506,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       apps: filtered,
       timeline,
       streamer,
+      logger: this._logger,
       onServiceStatus: (status: ServiceStatus) => {
+        this._log(`onServiceStatus: ${status.label} [${status.relativePath}] → ${status.state}`);
         const idx = this._serviceStatuses.findIndex(
           (s) => s.relativePath === status.relativePath
         );
@@ -476,8 +522,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this._startupRunner = runner;
+    this._log('_launchApps: new StartupRunner created, calling start()');
 
     await runner.start();
+
+    this._log('_launchApps: runner.start() completed');
   }
 
   private async _downloadReport(): Promise<void> {
@@ -721,6 +770,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _postMessage(message: ExtensionToWebviewMessage): void {
     if (this._view?.webview) {
       this._view.webview.postMessage(message);
+    } else {
+      this._log(`_postMessage: view not ready — message "${message.type}" dropped`);
     }
   }
 
