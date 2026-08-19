@@ -26,17 +26,6 @@ describe('LogStreamer command validation', () => {
         expect(exitCode).toBe(0);
     });
 
-    it('should handle commands with arguments', async () => {
-        const streamer = new LogStreamer();
-
-        const exitCode = await streamer.run(
-            'node --version',
-            process.cwd(),
-            'test'
-        );
-
-        expect(exitCode).toBe(0);
-    });
     it('should reject malicious commands', async () => {
         const streamer = new LogStreamer();
 

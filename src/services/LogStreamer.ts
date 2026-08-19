@@ -60,7 +60,7 @@ export class LogStreamer extends EventEmitter {
 
       const child = spawn(bin, args, {
         cwd,
-        shell: false,// Execute commands directly to avoid unnecessary shell interpretation.
+        shell: false, // Execute commands directly to avoid unnecessary shell interpretation.
         env: { ...process.env },
       });
 
