@@ -3,6 +3,16 @@ import { EventEmitter } from 'events';
 import { LogEntry, LogLevel } from '../types';
 import { now, uid } from '../utils/fs';
 
+const UNSUPPORTED_SHELL_PATTERNS = [
+  /;/,
+  /\|\|/,
+  /\|/,
+  />/,
+  /</,
+  /`/,
+  /\$\(/,
+];
+
 export class LogStreamer extends EventEmitter {
   private timestampLogs: boolean;
 
@@ -22,6 +32,12 @@ export class LogStreamer extends EventEmitter {
     this.emit('log', entry);
   }
 
+  private validateCommand(command: string): boolean {
+    return !UNSUPPORTED_SHELL_PATTERNS.some(
+      pattern => pattern.test(command)
+    );
+  }
+
   system(message: string, source = 'repostart'): void {
     this.emit_log('system', source, message);
   }
@@ -30,11 +46,21 @@ export class LogStreamer extends EventEmitter {
     return new Promise((resolve) => {
       this.emit_log('system', source, `▶ ${command}  (in ${cwd})`);
 
+      if (!this.validateCommand(command)) {
+        this.emit_log(
+          "error",
+          source,
+          `Unsupported shell syntax detected: ${command}`
+        );
+
+        resolve(1);
+        return;
+      }
       const [bin, ...args] = this.parseCommand(command);
 
       const child = spawn(bin, args, {
         cwd,
-        shell: true,           
+        shell: false,// Execute commands directly to avoid unnecessary shell interpretation.
         env: { ...process.env },
       });
 
