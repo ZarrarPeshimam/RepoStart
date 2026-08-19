@@ -4,6 +4,11 @@ import { LogStreamer } from '../LogStreamer';
 describe('LogStreamer command validation', () => {
     it('should reject commands containing shell operators', async () => {
         const streamer = new LogStreamer();
+        const logs: string[] = [];
+
+        streamer.on('log', (entry) => {
+            logs.push(entry.message);
+        });
 
         const exitCode = await streamer.run(
             'npm install && rm -rf /',
@@ -12,6 +17,12 @@ describe('LogStreamer command validation', () => {
         );
 
         expect(exitCode).toBe(1);
+
+        expect(
+            logs.some((message) =>
+                message.includes('Unsupported shell syntax detected')
+            )
+        ).toBe(true);
     });
 
     it('should allow normal commands', async () => {
@@ -28,6 +39,11 @@ describe('LogStreamer command validation', () => {
 
     it('should reject malicious commands', async () => {
         const streamer = new LogStreamer();
+        const logs: string[] = [];
+
+        streamer.on('log', (entry) => {
+            logs.push(entry.message);
+        });
 
         const exitCode = await streamer.run(
             'npm install; rm -rf /',
@@ -36,6 +52,11 @@ describe('LogStreamer command validation', () => {
         );
 
         expect(exitCode).toBe(1);
-    });
 
+        expect(
+            logs.some((message) =>
+                message.includes('Unsupported shell syntax detected')
+            )
+        ).toBe(true);
+    });
 });

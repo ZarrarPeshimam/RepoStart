@@ -4,6 +4,8 @@ import { LogEntry, LogLevel } from '../types';
 import { now, uid } from '../utils/fs';
 
 const UNSUPPORTED_SHELL_PATTERNS = [
+  /&&/,
+  /&/,
   /;/,
   /\|\|/,
   /\|/,
@@ -48,7 +50,7 @@ export class LogStreamer extends EventEmitter {
 
       if (!this.validateCommand(command)) {
         this.emit_log(
-          "error",
+          'error',
           source,
           `Unsupported shell syntax detected: ${command}`
         );
