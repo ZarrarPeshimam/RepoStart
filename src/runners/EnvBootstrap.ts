@@ -3,7 +3,19 @@ import * as path from 'path';
 import { AppFolder, EnvStatus } from '../types';
 import { ActivityTimeline } from '../services/ActivityTimeline';
 import { LogStreamer } from '../services/LogStreamer';
+import * as fs from 'fs/promises'
+import { applyEnvDefaults } from '../utils/envDefaults'
 
+export async function bootstrapEnv(examplePath: string, targetPath: string) {
+  // Read .env.example contents
+  const exampleContent = await fs.readFile(examplePath, 'utf8')
+
+  // Apply local development defaults to placeholders and empty entries
+  const processedContent = applyEnvDefaults(exampleContent)
+
+  // Write out the generated .env file
+  await fs.writeFile(targetPath, processedContent, 'utf8')
+}
 export class EnvBootstrap {
   constructor(
     private rootPath: string,
