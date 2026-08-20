@@ -4,12 +4,58 @@ import { AppFolder, EnvStatus } from '../types';
 import { ActivityTimeline } from '../services/ActivityTimeline';
 import { LogStreamer } from '../services/LogStreamer';
 
+// Local development default configurations for common service connection variables
+const LOCAL_DEV_DEFAULTS: Record<string, string> = {
+  MONGO_URI: 'mongodb://localhost:27017/<database-name>',
+  DATABASE_URL: 'postgresql://<username>:<password>@localhost:5432/<database-name>',
+  REDIS_URL: 'redis://localhost:6379',
+};
+
+function isPlaceholderOrEmpty(value: string | undefined): boolean {
+  if (value === undefined || value === null) return true;
+  const trimmed = value.trim();
+  if (trimmed === '' || trimmed === '""' || trimmed === "''") return true;
+
+  const normalized = trimmed.toUpperCase();
+  const placeholderPatterns = ['YOUR_', '<', 'YOUR-', 'CHANGE_ME', 'CHANGEME', 'TODO', 'DEFAULT'];
+
+  return (
+    placeholderPatterns.some((pattern) => normalized.includes(pattern)) ||
+    (trimmed.startsWith('<') && trimmed.endsWith('>'))
+  );
+}
+
+function applyLocalDevDefaults(envContent: string): string {
+  const lines = envContent.split(/\r?\n/);
+  const processedLines = lines.map((line) => {
+    const trimmedLine = line.trim();
+    if (!trimmedLine || trimmedLine.startsWith('#')) {
+      return line;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex === -1) {
+      return line;
+    }
+
+    const key = line.substring(0, eqIndex).trim();
+    const currentValue = line.substring(eqIndex + 1);
+
+    if (key in LOCAL_DEV_DEFAULTS && isPlaceholderOrEmpty(currentValue)) {
+      return `${key}=${LOCAL_DEV_DEFAULTS[key]}`;
+    }
+
+    return line;
+  });
+
+  return processedLines.join('\n');
+}
+
 export class EnvBootstrap {
   constructor(
     private rootPath: string,
     private timeline: ActivityTimeline,
     private streamer: LogStreamer,
-    
     private apps?: AppFolder[]
   ) {}
 
@@ -102,10 +148,13 @@ export class EnvBootstrap {
         'running'
       );
       try {
-        const contents = await fs.promises.readFile(envExamplePath, 'utf-8');
+        const rawContents = await fs.promises.readFile(envExamplePath, 'utf-8');
+        // Apply sensible local development defaults to empty or placeholder service variables
+        const contents = applyLocalDevDefaults(rawContents);
+
         await fs.promises.writeFile(envPath, contents, 'utf-8');
         this.streamer.system(
-          `✓ .env generated from .env.example in [${label}]`,
+          `✓ .env generated with local dev defaults from .env.example in [${label}]`,
           'repostart'
         );
         this.timeline.updateEvent(ev.id, 'success', `.env generated in ${label}`);
