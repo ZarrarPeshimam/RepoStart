@@ -15,6 +15,33 @@ const UNSUPPORTED_SHELL_PATTERNS = [
   /\$\(/,
 ];
 
+interface SpawnCommand {
+  executable: string;
+  args: string[];
+}
+
+export function prepareSpawnCommand(
+  bin: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+  comSpec?: string
+): SpawnCommand {
+  if (
+    platform === 'win32' &&
+    (bin === 'npm' || bin === 'pnpm' || bin === 'yarn')
+  ) {
+    return {
+      executable: comSpec || process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', `${bin}.cmd`, ...args],
+    };
+  }
+
+  return {
+    executable: bin,
+    args,
+  };
+}
+
 export class LogStreamer extends EventEmitter {
   private timestampLogs: boolean;
 
@@ -59,12 +86,17 @@ export class LogStreamer extends EventEmitter {
         return;
       }
       const [bin, ...args] = this.parseCommand(command);
+      const spawnCommand = prepareSpawnCommand(bin, args);
 
-      const child = spawn(bin, args, {
-        cwd,
-        shell: false, // Execute commands directly to avoid unnecessary shell interpretation.
-        env: { ...process.env },
-      });
+      const child = spawn(
+        spawnCommand.executable,
+        spawnCommand.args,
+        {
+          cwd,
+          shell: false,
+          env: { ...process.env },
+        }
+      );
 
       child.stdout.on('data', (chunk: Buffer) => {
         const lines = chunk.toString().split('\n');
