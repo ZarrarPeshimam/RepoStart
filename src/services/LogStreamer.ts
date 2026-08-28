@@ -3,6 +3,45 @@ import { EventEmitter } from 'events';
 import { LogEntry, LogLevel } from '../types';
 import { now, uid } from '../utils/fs';
 
+const UNSUPPORTED_SHELL_PATTERNS = [
+  /&&/,
+  /&/,
+  /;/,
+  /\|\|/,
+  /\|/,
+  />/,
+  /</,
+  /`/,
+  /\$\(/,
+];
+
+interface SpawnCommand {
+  executable: string;
+  args: string[];
+}
+
+export function prepareSpawnCommand(
+  bin: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+  comSpec?: string
+): SpawnCommand {
+  if (
+    platform === 'win32' &&
+    (bin === 'npm' || bin === 'pnpm' || bin === 'yarn')
+  ) {
+    return {
+      executable: comSpec || process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', `${bin}.cmd`, ...args],
+    };
+  }
+
+  return {
+    executable: bin,
+    args,
+  };
+}
+
 export class LogStreamer extends EventEmitter {
   private timestampLogs: boolean;
 
@@ -22,6 +61,12 @@ export class LogStreamer extends EventEmitter {
     this.emit('log', entry);
   }
 
+  private validateCommand(command: string): boolean {
+    return !UNSUPPORTED_SHELL_PATTERNS.some(
+      pattern => pattern.test(command)
+    );
+  }
+
   system(message: string, source = 'repostart'): void {
     this.emit_log('system', source, message);
   }
@@ -30,13 +75,28 @@ export class LogStreamer extends EventEmitter {
     return new Promise((resolve) => {
       this.emit_log('system', source, `▶ ${command}  (in ${cwd})`);
 
-      const [bin, ...args] = this.parseCommand(command);
+      if (!this.validateCommand(command)) {
+        this.emit_log(
+          'error',
+          source,
+          `Unsupported shell syntax detected: ${command}`
+        );
 
-      const child = spawn(bin, args, {
-        cwd,
-        shell: true,           
-        env: { ...process.env },
-      });
+        resolve(1);
+        return;
+      }
+      const [bin, ...args] = this.parseCommand(command);
+      const spawnCommand = prepareSpawnCommand(bin, args);
+
+      const child = spawn(
+        spawnCommand.executable,
+        spawnCommand.args,
+        {
+          cwd,
+          shell: false,
+          env: { ...process.env },
+        }
+      );
 
       child.stdout.on('data', (chunk: Buffer) => {
         const lines = chunk.toString().split('\n');
